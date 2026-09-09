@@ -1,0 +1,714 @@
+// ScubaXcursions App — Data Model
+// Prisma schema. This is the source of truth for the database structure.
+// org_id is on every business-data table from day one so this can become
+// multi-tenant later without a rewrite, even though v1 only ever has one org.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  engineType   = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  // No `url` here as of Prisma 7 — the CLI (migrate/generate/studio) reads
+  // the connection string from prisma.config.ts instead. The running app's
+  // PrismaClient gets its connection from a driver adapter (see lib/prisma.ts),
+  // not from this block either. See https://pris.ly/d/config-datasource.
+}
+
+// ---------------------------------------------------------------------------
+// ORGANIZATION (multi-tenant seam — only one row ("ScubaXcursions") in v1)
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users          User[]
+  boats          Boat[]
+  diveSites      DiveSite[]
+  launchSites    LaunchSite[]
+  trips          Trip[]
+  courses        Course[]
+  equipmentItems EquipmentItem[]
+  waivers        Waiver[]
+  notifications  Notification[]
+  siteConditions SiteCondition[]
+
+  @@map("organizations")
+}
+
+// ---------------------------------------------------------------------------
+// USERS, ROLES, CERTIFICATIONS
+// ---------------------------------------------------------------------------
+
+enum AppRole {
+  CLIENT
+  DIVEMASTER
+  SKIPPER
+  INSTRUCTOR
+  ADMIN
+  OWNER
+}
+
+enum CertAgency {
+  PADI
+  SSI
+  NAUI
+  CMAS
+  OTHER
+}
+
+enum CertLevel {
+  OPEN_WATER
+  ADVANCED_OPEN_WATER
+  RESCUE_DIVER
+  DIVEMASTER
+  ASSISTANT_INSTRUCTOR
+  INSTRUCTOR
+  INSTRUCTOR_TRAINER
+  OTHER
+}
+
+model User {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  email        String  @unique
+  phone        String?
+  passwordHash String  @map("password_hash")
+  firstName    String  @map("first_name")
+  lastName     String  @map("last_name")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roles UserRole[]
+
+  // Certification profile — CURRENT cert only, per client decision (v1: no history tracking)
+  certAgency         CertAgency? @map("cert_agency")
+  certLevel          CertLevel?  @map("cert_level")
+  certNumber         String?     @map("cert_number")
+  certSpecialties    String[]    @default([]) @map("cert_specialties") // e.g. ["Deep", "Nitrox", "Wreck"]
+  mostRecentDiveDate DateTime?   @map("most_recent_dive_date")
+  mostRecentDiveLoc  String?     @map("most_recent_dive_location")
+
+  bookings            Booking[]
+  equipmentProfile    UserEquipmentProfile?
+  siteFollows         SiteFollow[]
+  courseEnrollments   CourseEnrollment[]
+  tripWaitlistEntries TripWaitlistEntry[]
+  credits             Credit[]
+  waiverSignatures    WaiverSignature[]
+  pushTokens          PushToken[]
+  notifications       Notification[]
+  payments            Payment[]
+
+  skipperedTrips    Trip[]   @relation("TripSkipper")
+  createdTrips      Trip[]   @relation("TripCreatedBy")
+  cancelledTrips    Trip[]   @relation("TripCancelledBy")
+  instructedCourses Course[] @relation("CourseInstructor")
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// Many-to-many: a person can hold multiple operational roles
+// (e.g. Instructor AND Skipper). Certification level (above) is a
+// separate axis from operational permission (this table) — do not conflate.
+model UserRole {
+  id     String  @id @default(uuid())
+  userId String  @map("user_id")
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   AppRole
+
+  @@unique([userId, role])
+  @@map("user_roles")
+}
+
+// ---------------------------------------------------------------------------
+// BOATS
+// ---------------------------------------------------------------------------
+
+model Boat {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name     String
+  capacity Int     @default(10) // default 10 incl. skipper, per client decision — always overridable
+  active   Boolean @default(true) // fleet varies 1-3 boats seasonally; deactivate, don't delete
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  scheduleTemplates ScheduleTemplate[]
+  trips             Trip[]
+
+  @@index([organizationId])
+  @@map("boats")
+}
+
+// Recurring weekly launch template, per boat, per season. Manual per-trip
+// overrides happen on the Trip record itself, not here.
+model ScheduleTemplate {
+  id     String @id @default(uuid())
+  boatId String @map("boat_id")
+  boat   Boat   @relation(fields: [boatId], references: [id], onDelete: Cascade)
+
+  dayOfWeek   Int     @map("day_of_week") // 0 = Sunday ... 6 = Saturday
+  meetTime    String  @map("meet_time") // "07:00" — stored as string, interpreted in org's local tz
+  launchTime  String  @map("launch_time") // "08:00"
+  seasonLabel String? @map("season_label") // e.g. "Winter 2026" — lets meet/launch gap change seasonally
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("schedule_templates")
+}
+
+// ---------------------------------------------------------------------------
+// DIVE SITES
+// ---------------------------------------------------------------------------
+
+model DiveSite {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name         String
+  description  String?
+  latitude     Float?
+  longitude    Float?
+  minCertLevel CertLevel? @map("min_cert_level")
+
+  active       Boolean @default(true)
+  closedReason String? @map("closed_reason") // e.g. "Debris in water, closed until further notice"
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  trips       Trip[]
+  siteFollows SiteFollow[]
+
+  @@index([organizationId])
+  @@map("dive_sites")
+}
+
+// Physical departure point for a boat launch. This is deliberately separate
+// from the underwater dive destination represented by DiveSite.
+model LaunchSite {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name      String
+  address   String?
+  latitude  Float?
+  longitude Float?
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  trips Trip[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+  @@map("launch_sites")
+}
+
+// A client "follows" a dive site to be notified when a trip is scheduled
+// there. Notify-only — this does not reserve a spot.
+model SiteFollow {
+  id     String   @id @default(uuid())
+  userId String   @map("user_id")
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  siteId String   @map("site_id")
+  site   DiveSite @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, siteId])
+  @@map("site_follows")
+}
+
+// ---------------------------------------------------------------------------
+// TRIPS (the calendar) & BOOKINGS
+// ---------------------------------------------------------------------------
+
+enum TripStatus {
+  SCHEDULED
+  CANCELLED
+  COMPLETED
+}
+
+model Trip {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  boatId String @map("boat_id")
+  boat   Boat   @relation(fields: [boatId], references: [id])
+
+  launchSiteId String?     @map("launch_site_id")
+  launchSite   LaunchSite? @relation(fields: [launchSiteId], references: [id])
+
+  // Site is nullable + siteEstimated flag: client confirmed trips sometimes
+  // don't know the destination yet ("planning a dive in 3 days," TBD site).
+  siteId        String?   @map("site_id")
+  site          DiveSite? @relation(fields: [siteId], references: [id])
+  siteEstimated Boolean   @default(false) @map("site_estimated")
+
+  tripDate   DateTime @map("trip_date") // date only, semantically
+  meetTime   String   @map("meet_time")
+  launchTime String   @map("launch_time")
+
+  capacityOverride Int? @map("capacity_override") // null = use boat.capacity
+
+  status          TripStatus @default(SCHEDULED)
+  cancelledAt     DateTime?  @map("cancelled_at")
+  cancelledReason String?    @map("cancelled_reason")
+  cancelledById   String?    @map("cancelled_by_id")
+  cancelledBy     User?      @relation("TripCancelledBy", fields: [cancelledById], references: [id])
+
+  skipperId String? @map("skipper_id")
+  skipper   User?   @relation("TripSkipper", fields: [skipperId], references: [id])
+
+  createdById String @map("created_by_id")
+  createdBy   User   @relation("TripCreatedBy", fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  bookings         Booking[]
+  waitlistEntries  TripWaitlistEntry[]
+  waiverSignatures WaiverSignature[]
+
+  @@index([organizationId])
+  @@index([boatId, tripDate])
+  @@map("trips")
+}
+
+enum BookingStatus {
+  CONFIRMED
+  CANCELLED
+  CREDITED // cancelled by staff, client issued a credit to rebook
+}
+
+model Booking {
+  id     String @id @default(uuid())
+  tripId String @map("trip_id")
+  trip   Trip   @relation(fields: [tripId], references: [id])
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  status      BookingStatus @default(CONFIRMED)
+  bookedAt    DateTime      @default(now()) @map("booked_at")
+  cancelledAt DateTime?     @map("cancelled_at")
+
+  equipmentRequests BookingEquipmentRequest[]
+  payments          Payment[]
+
+  @@unique([tripId, userId])
+  @@index([tripId])
+  @@map("bookings")
+}
+
+// Waitlist for a FULL trip. Decision: "open race" — when a spot frees up,
+// ALL waiting users are notified simultaneously; whoever pays/claims first
+// wins. This is distinct from SiteFollow (which is about a site generally,
+// not a specific full trip).
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED // spot opened, notification sent, race is on
+  CLAIMED // this person won the race
+  EXPIRED // someone else claimed it, or trip departed
+}
+
+model TripWaitlistEntry {
+  id     String @id @default(uuid())
+  tripId String @map("trip_id")
+  trip   Trip   @relation(fields: [tripId], references: [id])
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  status     WaitlistStatus @default(WAITING)
+  joinedAt   DateTime       @default(now()) @map("joined_at")
+  notifiedAt DateTime?      @map("notified_at")
+  resolvedAt DateTime?      @map("resolved_at")
+
+  @@unique([tripId, userId])
+  @@map("trip_waitlist_entries")
+}
+
+// ---------------------------------------------------------------------------
+// COURSES
+// ---------------------------------------------------------------------------
+
+model Course {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  name                  String
+  description           String?
+  agency                CertAgency?
+  prerequisiteCertLevel CertLevel?  @map("prerequisite_cert_level")
+  price                 Decimal?    @db.Decimal(10, 2)
+
+  instructorId String @map("instructor_id")
+  instructor   User   @relation("CourseInstructor", fields: [instructorId], references: [id])
+
+  // No minimum student count by design — 1-on-1 courses are valid (client decision).
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions    CourseSession[]
+  enrollments CourseEnrollment[]
+
+  @@index([organizationId])
+  @@map("courses")
+}
+
+// A course runs across multiple sessions (pool, classroom, open water, across days).
+// Rescheduling a session = one-way push notification only, no client confirmation
+// required (client decision) — but instructors need this to be a fast edit.
+model CourseSession {
+  id       String @id @default(uuid())
+  courseId String @map("course_id")
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  sessionDate  DateTime @map("session_date")
+  startTime    String   @map("start_time")
+  endTime      String   @map("end_time")
+  locationType String   @map("location_type") // "pool" | "classroom" | "open_water"
+  siteId       String?  @map("site_id") // if open_water and a site is picked
+
+  notes String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("course_sessions")
+}
+
+enum EnrollmentStatus {
+  ENROLLED
+  COMPLETED
+  CANCELLED
+}
+
+model CourseEnrollment {
+  id       String @id @default(uuid())
+  courseId String @map("course_id")
+  course   Course @relation(fields: [courseId], references: [id])
+  userId   String @map("user_id")
+  user     User   @relation(fields: [userId], references: [id])
+
+  status     EnrollmentStatus @default(ENROLLED)
+  enrolledAt DateTime         @default(now()) @map("enrolled_at")
+
+  payments Payment[]
+
+  @@unique([courseId, userId])
+  @@map("course_enrollments")
+}
+
+// ---------------------------------------------------------------------------
+// EQUIPMENT REQUESTS
+// ---------------------------------------------------------------------------
+// Equipment selected during booking is a request for staff, not a stock
+// reservation or guarantee of availability. Exact inventory allocation can be
+// added later without changing the historical request records below.
+
+enum EquipmentCategory {
+  BCD
+  REGULATOR
+  CYLINDER
+  WEIGHTS
+  WETSUIT
+  FINS
+  MASK
+  DIVE_COMPUTER
+}
+
+enum GasType {
+  AIR
+  NITROX
+}
+
+enum CylinderForm {
+  STANDARD
+  TALL
+}
+
+enum FinStyle {
+  OPEN_HEEL
+  FULL_FOOT
+}
+
+// The centre's searchable equipment catalogue. This describes what clients may
+// request; it intentionally does not track stock counts or availability.
+model EquipmentItem {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  // Stable machine-readable identifier used by seed scripts and API logic.
+  // Examples: "bcd", "regulator", "cylinder", "weights".
+  slug         String
+  name         String
+  category     EquipmentCategory
+  active       Boolean           @default(true)
+  displayOrder Int               @default(0) @map("display_order")
+
+  bookingRequests BookingEquipmentRequest[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, category, active])
+  @@map("equipment_items")
+}
+
+// A client's reusable defaults. These values prefill future booking forms but
+// do not change equipment requests already stored against previous bookings.
+model UserEquipmentProfile {
+  userId String @id @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  bcdSize     String? @map("bcd_size")
+  wetsuitSize String? @map("wetsuit_size")
+
+  preferredGasType              GasType?      @map("preferred_gas_type")
+  preferredNitroxPercent        Int?          @map("preferred_nitrox_percent")
+  preferredCylinderVolumeLitres Int?          @map("preferred_cylinder_volume_litres")
+  preferredCylinderForm         CylinderForm? @map("preferred_cylinder_form")
+
+  preferredWeightKg Decimal?  @map("preferred_weight_kg") @db.Decimal(4, 1)
+  shoeSizeUk        Decimal?  @map("shoe_size_uk") @db.Decimal(3, 1)
+  finStyle          FinStyle? @map("fin_style")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("user_equipment_profiles")
+}
+
+// A snapshot of what the client requested for one booking. These rows do not
+// mean that staff have reserved, confirmed, or allocated physical equipment.
+model BookingEquipmentRequest {
+  id String @id @default(uuid())
+
+  bookingId String  @map("booking_id")
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  equipmentItemId String        @map("equipment_item_id")
+  equipmentItem   EquipmentItem @relation(fields: [equipmentItemId], references: [id], onDelete: Restrict)
+
+  quantity Int @default(1)
+
+  // Used by size-based items such as BCDs and wetsuits.
+  requestedSize String? @map("requested_size")
+
+  // Used by cylinder requests.
+  gasType              GasType?      @map("gas_type")
+  nitroxPercent        Int?          @map("nitrox_percent")
+  cylinderVolumeLitres Int?          @map("cylinder_volume_litres")
+  cylinderForm         CylinderForm? @map("cylinder_form")
+
+  // Total lead requested, measured in kilograms.
+  requestedWeightKg Decimal? @map("requested_weight_kg") @db.Decimal(4, 1)
+
+  // Used by fin requests.
+  shoeSizeUk Decimal?  @map("shoe_size_uk") @db.Decimal(3, 1)
+  finStyle   FinStyle? @map("fin_style")
+
+  // Free text is only for exceptional information, not the primary data store.
+  clientNote String? @map("client_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([bookingId, equipmentItemId])
+  @@index([equipmentItemId, requestedSize])
+  @@index([gasType, nitroxPercent])
+  @@map("booking_equipment_requests")
+}
+
+// ---------------------------------------------------------------------------
+// PAYMENTS & CREDITS (schema ready now, gateway integration is phase 2)
+// ---------------------------------------------------------------------------
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+model Payment {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  bookingId          String?           @map("booking_id")
+  booking            Booking?          @relation(fields: [bookingId], references: [id])
+  courseEnrollmentId String?           @map("course_enrollment_id")
+  courseEnrollment   CourseEnrollment? @relation(fields: [courseEnrollmentId], references: [id])
+
+  amount   Decimal       @db.Decimal(10, 2)
+  currency String        @default("ZAR")
+  status   PaymentStatus @default(PENDING)
+
+  gateway    String? // "payfast" | "yoco" | "peach" | "paystack" | "ozow" — TBD phase 2
+  gatewayRef String? @map("gateway_ref")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("payments")
+}
+
+// Issued when staff cancels a trip — client gets credit to rebook (client decision)
+model Credit {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  amount          Decimal @db.Decimal(10, 2)
+  reason          String?
+  sourceBookingId String? @map("source_booking_id")
+
+  status    String    @default("available") // "available" | "used"
+  createdAt DateTime  @default(now()) @map("created_at")
+  usedAt    DateTime? @map("used_at")
+
+  @@map("credits")
+}
+
+// ---------------------------------------------------------------------------
+// WAIVERS — signable only 24h before or on the day of the dive (client decision)
+// ---------------------------------------------------------------------------
+
+model Waiver {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  version String
+  content String @db.Text
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  signatures WaiverSignature[]
+
+  @@index([organizationId])
+  @@map("waivers")
+}
+
+model WaiverSignature {
+  id       String @id @default(uuid())
+  waiverId String @map("waiver_id")
+  waiver   Waiver @relation(fields: [waiverId], references: [id])
+  userId   String @map("user_id")
+  user     User   @relation(fields: [userId], references: [id])
+  tripId   String @map("trip_id")
+  trip     Trip   @relation(fields: [tripId], references: [id])
+
+  availableFrom DateTime  @map("available_from") // computed: trip date/time minus 24h
+  signedAt      DateTime? @map("signed_at")
+
+  @@unique([tripId, userId])
+  @@map("waiver_signatures")
+}
+
+// ---------------------------------------------------------------------------
+// NOTIFICATIONS (push-only, per client decision)
+// ---------------------------------------------------------------------------
+
+model PushToken {
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expoPushToken String  @unique @map("expo_push_token")
+  deviceInfo    String? @map("device_info")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("push_tokens")
+}
+
+model Notification {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  userId         String       @map("user_id")
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type              String // "trip_cancelled" | "site_trip_scheduled" | "course_posted" | "course_rescheduled" | "waitlist_spot_open" | "booking_confirmed" | "waiver_available"
+  title             String
+  body              String
+  relatedEntityType String? @map("related_entity_type") // "trip" | "course" | "site" | "booking"
+  relatedEntityId   String? @map("related_entity_id")
+
+  sentAt DateTime  @default(now()) @map("sent_at")
+  readAt DateTime? @map("read_at")
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// SITE CONDITIONS — Sappi Umkomaas buoy feed (planning doc Section 8)
+// ---------------------------------------------------------------------------
+// Filler/placeholder model until Sappi grants data access (email sent to
+// Craig.Daniel@sappi.com, awaiting response as of Round 2). Every reading
+// field is nullable on purpose: a manual placeholder entry, or an early
+// partial feed from Sappi, won't have all of waves/weather/current filled
+// in, and the mobile Conditions screen is built to handle that gracefully
+// (renders "—" for anything null) rather than assuming a full reading.
+//
+// Not tied to a specific DiveSite — the buoy covers the whole Aliwal Shoal /
+// Umkomaas operating area, not one named site, so this is org-scoped only.
+model SiteCondition {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  source     String   @default("placeholder") // "placeholder" | "sappi_buoy" | "manual"
+  recordedAt DateTime @map("recorded_at")
+
+  // Waves
+  significantWaveHeightM Float? @map("significant_wave_height_m")
+  maxWaveHeightM         Float? @map("max_wave_height_m")
+  meanWavePeriodS        Float? @map("mean_wave_period_s")
+
+  // Weather
+  windSpeedMps     Float? @map("wind_speed_mps")
+  windDirectionDeg Int?   @map("wind_direction_deg")
+  airTemperatureC  Float? @map("air_temperature_c")
+  airPressureHpa   Float? @map("air_pressure_hpa")
+
+  // Current + sea temp
+  meanCurrentSpeedMps    Float? @map("mean_current_speed_mps")
+  surfaceCurrentSpeedMps Float? @map("surface_current_speed_mps")
+  currentDirectionDeg    Int?   @map("current_direction_deg")
+  seaSurfaceTempC        Float? @map("sea_surface_temp_c")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, source, recordedAt])
+  @@index([organizationId, recordedAt])
+  @@map("site_conditions")
+}

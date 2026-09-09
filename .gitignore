@@ -1,0 +1,26 @@
+# Dependencies
+**/node_modules/
+
+# Environment variables and secrets
+**/.env
+**/.env.*
+!**/.env.example
+
+# Builds
+**/dist/
+**/build/
+**/coverage/
+
+# Expo
+mobile/.expo/
+mobile/web-build/
+
+# Logs
+**/*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+# Prisma Client is generated locally by npm install/build.
+backend/src/generated/

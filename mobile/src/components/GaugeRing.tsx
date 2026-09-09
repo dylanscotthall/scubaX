@@ -1,0 +1,181 @@
+import React from "react";
+import { View, Text, StyleSheet } from "react-native";
+import Svg, { Circle, Path } from "react-native-svg";
+import { colors, spacing, readoutFontFamily } from "../theme";
+
+interface GaugeRingProps {
+  value: number;
+  label: string;
+  valueLabel: string;
+  color?: string;
+  centerColor?: string;
+  size?: number;
+  slots?: number;
+}
+
+function polarToCartesian(
+  cx: number,
+  cy: number,
+  radius: number,
+  angle: number,
+) {
+  const radians = ((angle - 90) * Math.PI) / 180;
+
+  return {
+    x: cx + radius * Math.cos(radians),
+    y: cy + radius * Math.sin(radians),
+  };
+}
+
+function describeDonutSegment(
+  cx: number,
+  cy: number,
+  outerRadius: number,
+  innerRadius: number,
+  startAngle: number,
+  endAngle: number,
+) {
+  const outerStart = polarToCartesian(cx, cy, outerRadius, startAngle);
+
+  const outerEnd = polarToCartesian(cx, cy, outerRadius, endAngle);
+
+  const innerStart = polarToCartesian(cx, cy, innerRadius, startAngle);
+
+  const innerEnd = polarToCartesian(cx, cy, innerRadius, endAngle);
+
+  const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
+
+  return [
+    `M ${outerStart.x} ${outerStart.y}`,
+    `A ${outerRadius} ${outerRadius} 0 ${largeArcFlag} 1 ${outerEnd.x} ${outerEnd.y}`,
+    `L ${innerEnd.x} ${innerEnd.y}`,
+    `A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${innerStart.x} ${innerStart.y}`,
+    "Z",
+  ].join(" ");
+}
+
+function getCapacityColor(value: number) {
+  if (value >= 0.9) {
+    return colors.danger600;
+  }
+
+  if (value >= 0.75) {
+    return colors.warning600;
+  }
+
+  if (value >= 0.5) {
+    return colors.success600;
+  }
+
+  if (value >= 0.25) {
+    return colors.ocean600;
+  }
+
+  return colors.sky400;
+}
+
+export function GaugeRing({
+  value,
+  label,
+  valueLabel,
+  color,
+  centerColor = colors.white,
+  size = 84,
+  slots = 8,
+}: GaugeRingProps) {
+  const center = size / 2;
+  const outerRadius = size / 2;
+  const innerRadius = size * 0.28;
+
+  const clamped = Math.max(0, Math.min(1, value));
+
+  const safeSlots = Math.max(1, Math.round(slots));
+  const filledSlots = Math.round(clamped * safeSlots);
+
+  const slotAngle = 360 / safeSlots;
+  const gapAngle = Math.min(4, slotAngle * 0.18);
+
+  const activeColor = color ?? getCapacityColor(clamped);
+
+  return (
+    <View style={styles.wrap}>
+      <View style={{ width: size, height: size }}>
+        <Svg width={size} height={size}>
+          {Array.from({ length: safeSlots }).map((_, index) => {
+            const startAngle = index * slotAngle + gapAngle / 2;
+
+            const endAngle = (index + 1) * slotAngle - gapAngle / 2;
+
+            const isFilled = index < filledSlots;
+
+            return (
+              <Path
+                key={index}
+                d={describeDonutSegment(
+                  center,
+                  center,
+                  outerRadius,
+                  innerRadius,
+                  startAngle,
+                  endAngle,
+                )}
+                fill={isFilled ? activeColor : colors.sand100}
+              />
+            );
+          })}
+
+          <Circle
+            cx={center}
+            cy={center}
+            r={innerRadius - 1}
+            fill={centerColor}
+          />
+        </Svg>
+
+        <View style={styles.centerLabel}>
+          <Text
+            style={[styles.valueText, { color: activeColor }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+          >
+            {valueLabel}
+          </Text>
+        </View>
+      </View>
+
+      <Text style={styles.label}>{label}</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    alignItems: "center",
+  },
+  centerLabel: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  valueText: {
+    fontFamily: readoutFontFamily,
+    fontSize: 13,
+    fontWeight: "700",
+    textAlign: "center",
+    paddingHorizontal: 4,
+  },
+  label: {
+    paddingTop: 10,
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.slate600,
+    marginTop: spacing.xs,
+    textAlign: "center",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+});
