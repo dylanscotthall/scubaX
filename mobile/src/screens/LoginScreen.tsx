@@ -3,7 +3,6 @@ import {
   View,
   Text,
   TextInput,
-  StyleSheet,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -12,15 +11,98 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors, gradients, spacing, radii } from "../theme";
+import { fontFamily, radii, spacing, useTheme, useThemedStyles } from "../theme";
 import { Button } from "../components/Button";
+import { Card } from "../components/Card";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
 
 type AuthMode = "login" | "register";
 
+function useLoginStyles() {
+  return useThemedStyles((p) => ({
+    fill: { flex: 1 },
+    scroll: {
+      flexGrow: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: spacing.xl,
+      paddingVertical: spacing.xxxl,
+    },
+    logo: {
+      width: 140,
+      height: 140,
+    },
+    tagline: {
+      color: "rgba(255,255,255,0.9)",
+      fontSize: 13,
+      fontWeight: "600",
+      marginTop: spacing.sm,
+      marginBottom: spacing.xxl,
+      textAlign: "center",
+    },
+    card: {
+      width: "100%",
+      marginHorizontal: 0,
+      marginBottom: 0,
+    },
+    modeRow: {
+      flexDirection: "row",
+      padding: 3,
+      borderRadius: radii.sm,
+      backgroundColor: p.backgroundAlt,
+      marginBottom: spacing.md,
+    },
+    modeButton: {
+      flex: 1,
+      alignItems: "center",
+      paddingVertical: 10,
+      borderRadius: radii.sm,
+    },
+    modeButtonActive: {
+      backgroundColor: p.surface,
+    },
+    modeText: {
+      color: p.textSecondary,
+      fontSize: 13,
+      fontFamily: fontFamily.displayMedium,
+    },
+    modeTextActive: {
+      color: p.accentPrimary,
+    },
+    label: {
+      fontSize: 12,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.3,
+      textTransform: "uppercase",
+      color: p.textSecondary,
+      marginBottom: spacing.xs,
+      marginTop: spacing.md,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: p.borderStrong,
+      borderRadius: radii.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: p.textPrimary,
+    },
+    error: {
+      color: p.danger,
+      fontSize: 13,
+      marginTop: spacing.md,
+    },
+    submitButton: {
+      marginTop: spacing.xl,
+    },
+  }));
+}
+
 export function LoginScreen() {
   const { login, register } = useAuth();
+  const { gradients, palette } = useTheme();
+  const styles = useLoginStyles();
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -92,7 +174,7 @@ export function LoginScreen() {
               Scuba diving & x-treme sport adventures
             </Text>
 
-            <View style={styles.card}>
+            <Card style={styles.card}>
               <View style={styles.modeRow}>
                 <Pressable
                   onPress={() => changeMode("login")}
@@ -139,7 +221,7 @@ export function LoginScreen() {
                     autoCapitalize="words"
                     textContentType="givenName"
                     placeholder="First name"
-                    placeholderTextColor={colors.slate400}
+                    placeholderTextColor={palette.textTertiary}
                   />
 
                   <Text style={styles.label}>Last name</Text>
@@ -150,7 +232,7 @@ export function LoginScreen() {
                     autoCapitalize="words"
                     textContentType="familyName"
                     placeholder="Last name"
-                    placeholderTextColor={colors.slate400}
+                    placeholderTextColor={palette.textTertiary}
                   />
 
                   <Text style={styles.label}>Phone (optional)</Text>
@@ -161,7 +243,7 @@ export function LoginScreen() {
                     keyboardType="phone-pad"
                     textContentType="telephoneNumber"
                     placeholder="+27 ..."
-                    placeholderTextColor={colors.slate400}
+                    placeholderTextColor={palette.textTertiary}
                   />
                 </>
               ) : null}
@@ -176,7 +258,7 @@ export function LoginScreen() {
                 keyboardType="email-address"
                 textContentType="emailAddress"
                 placeholder="you@example.com"
-                placeholderTextColor={colors.slate400}
+                placeholderTextColor={palette.textTertiary}
               />
 
               <Text style={styles.label}>Password</Text>
@@ -187,7 +269,7 @@ export function LoginScreen() {
                 secureTextEntry
                 textContentType={mode === "register" ? "newPassword" : "password"}
                 placeholder={mode === "register" ? "At least 8 characters" : "Password"}
-                placeholderTextColor={colors.slate400}
+                placeholderTextColor={palette.textTertiary}
               />
 
               {mode === "register" ? (
@@ -200,7 +282,7 @@ export function LoginScreen() {
                     secureTextEntry
                     textContentType="newPassword"
                     placeholder="Repeat password"
-                    placeholderTextColor={colors.slate400}
+                    placeholderTextColor={palette.textTertiary}
                   />
                 </>
               ) : null}
@@ -219,89 +301,10 @@ export function LoginScreen() {
                 }
                 style={styles.submitButton}
               />
-            </View>
+            </Card>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </LinearGradient>
   );
 }
-
-const styles = StyleSheet.create({
-  fill: { flex: 1 },
-  scroll: {
-    flexGrow: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: spacing.xl,
-    paddingVertical: spacing.xxxl,
-  },
-  logo: {
-    width: 140,
-    height: 140,
-  },
-  tagline: {
-    color: "rgba(255,255,255,0.9)",
-    fontSize: 13,
-    fontWeight: "600",
-    marginTop: spacing.sm,
-    marginBottom: spacing.xxl,
-    textAlign: "center",
-  },
-  card: {
-    width: "100%",
-    backgroundColor: colors.white,
-    borderRadius: radii.lg,
-    padding: spacing.xl,
-  },
-  modeRow: {
-    flexDirection: "row",
-    padding: 3,
-    borderRadius: radii.sm,
-    backgroundColor: colors.sand50,
-    marginBottom: spacing.md,
-  },
-  modeButton: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 10,
-    borderRadius: radii.sm,
-  },
-  modeButtonActive: {
-    backgroundColor: colors.white,
-  },
-  modeText: {
-    color: colors.slate600,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  modeTextActive: {
-    color: colors.ocean600,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 0.3,
-    textTransform: "uppercase",
-    color: colors.slate600,
-    marginBottom: spacing.xs,
-    marginTop: spacing.md,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.slate200,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: colors.ink900,
-  },
-  error: {
-    color: colors.danger600,
-    fontSize: 13,
-    marginTop: spacing.md,
-  },
-  submitButton: {
-    marginTop: spacing.xl,
-  },
-});

@@ -5,7 +5,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   TextInput,
   View,
@@ -19,16 +18,26 @@ import DateTimePicker, {
 import { ScreenHeader } from "../components/ScreenHeader";
 import { Card } from "../components/Card";
 import { Button } from "../components/Button";
+import { ChipPicker } from "../components/ChipPicker";
 import { ErrorBanner } from "../components/ErrorBanner";
-import { colors, spacing, radii } from "../theme";
+import { colors, fontFamily, spacing, radii, useTheme, useThemedStyles } from "../theme";
 import { ApiError, apiRequest } from "../api/client";
 import {
   Boat,
   DiveSite,
+  DiveType,
   LaunchSite,
   StaffMember,
   CreateTripInput,
 } from "../api/types";
+
+const DIVE_TYPE_OPTIONS = [
+  { label: "Snorkel", value: "SNORKEL" },
+  { label: "Scuba (max 18m)", value: "SCUBA" },
+  { label: "Deep (18-40m)", value: "DEEP" },
+  { label: "Baited shark snorkel", value: "BAITED_SHARK_SNORKEL" },
+  { label: "Baited shark scuba", value: "BAITED_SHARK_SCUBA" },
+];
 
 function pad(value: number) {
   return String(value).padStart(2, "0");
@@ -61,6 +70,115 @@ function formatDisplayDate(date: Date) {
   });
 }
 
+function entityOptions(items: { id: string; name: string }[]) {
+  return items.map((item) => ({ label: item.name, value: item.id }));
+}
+
+function useCreateLaunchStyles() {
+  return useThemedStyles((p) => ({
+    screen: { flex: 1, backgroundColor: colors.deepSea900 },
+    loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+    content: { paddingTop: spacing.lg, paddingBottom: spacing.xxl },
+
+    fieldLabel: {
+      fontSize: 11,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+      color: p.textSecondary,
+      marginTop: spacing.md,
+      marginBottom: spacing.xs,
+    },
+    emptyNote: {
+      fontSize: 13,
+      color: p.textSecondary,
+      fontStyle: "italic",
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: p.borderStrong,
+      borderRadius: radii.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 12,
+      fontSize: 15,
+      color: p.textPrimary,
+      backgroundColor: p.backgroundAlt,
+    },
+    timeRow: {
+      flexDirection: "row",
+      gap: spacing.md,
+    },
+    timeField: {
+      flex: 1,
+    },
+
+    pickerField: {
+      marginTop: spacing.md,
+    },
+    pickerButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderWidth: 1,
+      borderColor: p.borderStrong,
+      borderRadius: radii.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 12,
+      backgroundColor: p.backgroundAlt,
+    },
+    pickerButtonPressed: {
+      opacity: 0.7,
+    },
+    pickerValue: {
+      flex: 1,
+      fontSize: 15,
+      fontFamily: fontFamily.readoutBold,
+      color: p.textPrimary,
+    },
+    iosPickerContainer: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      borderWidth: 1,
+      borderColor: p.borderStrong,
+      borderRadius: radii.sm,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 4,
+      backgroundColor: p.backgroundAlt,
+    },
+
+    toggleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: spacing.md,
+    },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 6,
+      borderWidth: 2,
+      borderColor: p.borderStrong,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: spacing.sm,
+    },
+    checkboxChecked: {
+      backgroundColor: p.accentPrimary,
+      borderColor: p.accentPrimary,
+    },
+    toggleLabel: {
+      flex: 1,
+      fontSize: 13,
+      color: p.textSecondary,
+    },
+
+    actionColumn: {
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.sm,
+    },
+  }));
+}
+
 type PickerFieldProps = {
   label: string;
   mode: "date" | "time";
@@ -76,6 +194,9 @@ function PickerField({
   onChange,
   minimumDate,
 }: PickerFieldProps) {
+  const styles = useCreateLaunchStyles();
+  const { palette } = useTheme();
+
   function openAndroidPicker() {
     DateTimePickerAndroid.open({
       value,
@@ -97,7 +218,7 @@ function PickerField({
       },
       negativeButton: {
         label: "Cancel",
-        textColor: colors.slate600,
+        textColor: palette.textSecondary,
       },
     });
   }
@@ -124,7 +245,7 @@ function PickerField({
           <Text style={styles.pickerValue}>
             {mode === "date" ? formatDisplayDate(value) : formatTime(value)}
           </Text>
-          <Ionicons name="chevron-down" size={18} color={colors.slate400} />
+          <Ionicons name="chevron-down" size={18} color={palette.textTertiary} />
         </Pressable>
       ) : (
         <View style={styles.iosPickerContainer}>
@@ -153,64 +274,15 @@ function PickerField({
   );
 }
 
-// Generic "pick one from a short named list" control — boats, launch sites,
-// dive sites, and skippers are all small lists for a single dive centre
-// (the plan doc caps boats at 3), so a wrapping row of chips reads faster
-// than a dropdown/modal picker for staff using this often.
-function EntityChips({
-  items,
-  selectedId,
-  onSelect,
-  allowNone,
-  noneLabel = "None",
-}: {
-  items: { id: string; name: string }[];
-  selectedId: string | null;
-  onSelect: (id: string | null) => void;
-  allowNone?: boolean;
-  noneLabel?: string;
-}) {
-  return (
-    <View style={styles.chipRow}>
-      {allowNone && (
-        <Pressable
-          onPress={() => onSelect(null)}
-          style={[styles.chip, selectedId === null && styles.chipActive]}
-        >
-          <Text
-            style={[
-              styles.chipText,
-              selectedId === null && styles.chipTextActive,
-            ]}
-          >
-            {noneLabel}
-          </Text>
-        </Pressable>
-      )}
-      {items.map((item) => {
-        const active = item.id === selectedId;
-        return (
-          <Pressable
-            key={item.id}
-            onPress={() => onSelect(item.id)}
-            style={[styles.chip, active && styles.chipActive]}
-          >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>
-              {item.name}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-}
-
 function FieldLabel({ children }: { children: React.ReactNode }) {
+  const styles = useCreateLaunchStyles();
   return <Text style={styles.fieldLabel}>{children}</Text>;
 }
 
 export function CreateLaunchScreen() {
   const navigation = useNavigation<any>();
+  const styles = useCreateLaunchStyles();
+  const { palette } = useTheme();
 
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -223,6 +295,7 @@ export function CreateLaunchScreen() {
   const [launchSiteId, setLaunchSiteId] = useState<string | null>(null);
   const [siteId, setSiteId] = useState<string | null>(null);
   const [siteEstimated, setSiteEstimated] = useState(false);
+  const [diveType, setDiveType] = useState<DiveType | null>(null);
   const [skipperId, setSkipperId] = useState<string | null>(null);
   const [tripDate, setTripDate] = useState(() => new Date());
   const [meetTime, setMeetTime] = useState(() => createTime(7, 0));
@@ -275,6 +348,7 @@ export function CreateLaunchScreen() {
   // sane whole number, and meet time is before launch time).
   function validate(): string | null {
     if (!boatId) return "Pick a boat.";
+    if (!diveType) return "Pick a dive type.";
     if (capacityOverride.trim() && !/^\d+$/.test(capacityOverride.trim())) {
       return "Capacity override must be a whole number.";
     }
@@ -301,6 +375,7 @@ export function CreateLaunchScreen() {
         launchSiteId,
         siteId,
         siteEstimated: siteId ? siteEstimated : true,
+        diveType,
         tripDate: formatApiDate(tripDate),
         meetTime: formatTime(meetTime),
         launchTime: formatTime(launchTime),
@@ -349,10 +424,10 @@ export function CreateLaunchScreen() {
                 No active boats — add one first.
               </Text>
             ) : (
-              <EntityChips
-                items={boats}
-                selectedId={boatId}
-                onSelect={setBoatId}
+              <ChipPicker
+                options={entityOptions(boats)}
+                value={boatId}
+                onChange={setBoatId}
               />
             )}
 
@@ -389,7 +464,7 @@ export function CreateLaunchScreen() {
               value={capacityOverride}
               onChangeText={setCapacityOverride}
               placeholder="Defaults to the boat's capacity"
-              placeholderTextColor={colors.slate400}
+              placeholderTextColor={palette.textTertiary}
               keyboardType="number-pad"
             />
           </Card>
@@ -399,10 +474,10 @@ export function CreateLaunchScreen() {
             {launchSites.length === 0 ? (
               <Text style={styles.emptyNote}>No launch sites set up yet.</Text>
             ) : (
-              <EntityChips
-                items={launchSites}
-                selectedId={launchSiteId}
-                onSelect={setLaunchSiteId}
+              <ChipPicker
+                options={entityOptions(launchSites)}
+                value={launchSiteId}
+                onChange={setLaunchSiteId}
                 allowNone
                 noneLabel="Not set"
               />
@@ -412,10 +487,10 @@ export function CreateLaunchScreen() {
             {diveSites.length === 0 ? (
               <Text style={styles.emptyNote}>No dive sites set up yet.</Text>
             ) : (
-              <EntityChips
-                items={diveSites}
-                selectedId={siteId}
-                onSelect={(id) => {
+              <ChipPicker
+                options={entityOptions(diveSites)}
+                value={siteId}
+                onChange={(id) => {
                   setSiteId(id);
                   if (id) setSiteEstimated(false);
                 }}
@@ -445,6 +520,15 @@ export function CreateLaunchScreen() {
                 </Text>
               </Pressable>
             )}
+
+            <FieldLabel>Dive type</FieldLabel>
+            <ChipPicker
+              options={DIVE_TYPE_OPTIONS}
+              value={diveType}
+              onChange={(id) => setDiveType(id as DiveType | null)}
+              allowNone
+              noneLabel="Not set"
+            />
           </Card>
 
           <Card>
@@ -454,10 +538,10 @@ export function CreateLaunchScreen() {
                 No staff with the Skipper role yet.
               </Text>
             ) : (
-              <EntityChips
-                items={skippers}
-                selectedId={skipperId}
-                onSelect={setSkipperId}
+              <ChipPicker
+                options={entityOptions(skippers)}
+                value={skipperId}
+                onChange={setSkipperId}
                 allowNone
                 noneLabel="Unassigned"
               />
@@ -476,135 +560,3 @@ export function CreateLaunchScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.deepSea900 },
-  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
-  content: { paddingTop: spacing.lg, paddingBottom: spacing.xxl },
-
-  fieldLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-    color: colors.slate600,
-    marginTop: spacing.md,
-    marginBottom: spacing.xs,
-  },
-  emptyNote: {
-    fontSize: 13,
-    color: colors.slate600,
-    fontStyle: "italic",
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.slate200,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: colors.navy900,
-    backgroundColor: colors.sand50,
-  },
-  timeRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  timeField: {
-    flex: 1,
-  },
-
-  pickerField: {
-    marginTop: spacing.md,
-  },
-  pickerButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.slate200,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 12,
-    backgroundColor: colors.sand50,
-  },
-  pickerButtonPressed: {
-    opacity: 0.7,
-  },
-  pickerValue: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.navy900,
-  },
-  iosPickerContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.slate200,
-    borderRadius: radii.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 4,
-    backgroundColor: colors.sand50,
-  },
-
-  chipRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  chip: {
-    paddingVertical: 10,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.sm,
-    borderWidth: 1.5,
-    borderColor: colors.slate200,
-    backgroundColor: colors.white,
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  chipActive: {
-    backgroundColor: colors.ocean600,
-    borderColor: colors.ocean600,
-  },
-  chipText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.navy900,
-  },
-  chipTextActive: {
-    color: colors.white,
-  },
-
-  toggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacing.md,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: colors.slate200,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: spacing.sm,
-  },
-  checkboxChecked: {
-    backgroundColor: colors.ocean600,
-    borderColor: colors.ocean600,
-  },
-  toggleLabel: {
-    flex: 1,
-    fontSize: 13,
-    color: colors.slate600,
-  },
-
-  actionColumn: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-  },
-});

@@ -8,17 +8,317 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useNavigation } from "@react-navigation/native";
 
 import { ScreenHeader } from "../components/ScreenHeader";
 import { StatusPill } from "../components/StatusPill";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { HeroPanel } from "../components/HeroPanel";
+import { EmptyState } from "../components/EmptyState";
 
-import { colors, gradients, radii, readoutFontFamily, spacing } from "../theme";
+import { colors, fontFamily, radii, shadows, spacing, useThemedStyles } from "../theme";
 
 import { ApiError, apiRequest } from "../api/client";
 import { Course } from "../api/types";
+import { useAuth } from "../context/AuthContext";
+
+// Same roles the backend's POST /courses actually allows (courses.ts's
+// courseStaffRoles).
+const CAN_CREATE_COURSE_ROLES = ["ADMIN", "OWNER", "INSTRUCTOR"];
+
+const CERT_LEVEL_LABELS: Record<string, string> = {
+  OPEN_WATER: "Open Water",
+  ADVANCED_OPEN_WATER: "Advanced Open Water",
+  RESCUE_DIVER: "Rescue Diver",
+  DIVEMASTER: "Divemaster",
+  ASSISTANT_INSTRUCTOR: "Assistant Instructor",
+  INSTRUCTOR: "Instructor",
+  INSTRUCTOR_TRAINER: "Instructor Trainer",
+  OTHER: "Other",
+};
+
+function useCoursesStyles() {
+  return useThemedStyles((p) => ({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.deepSea900,
+    },
+    content: {
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xxxl,
+    },
+    heroIcon: {
+      width: 54,
+      height: 54,
+      borderRadius: 27,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.12)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.18)",
+    },
+    heroText: {
+      marginTop: spacing.lg,
+    },
+    heroEyebrow: {
+      fontSize: 9,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.8,
+      color: colors.highlight500,
+    },
+    heroTitle: {
+      marginTop: 4,
+      fontSize: 25,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+    },
+    heroBody: {
+      marginTop: spacing.sm,
+      maxWidth: 320,
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.sand100,
+    },
+    heroStats: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      marginTop: spacing.xl,
+      paddingTop: spacing.lg,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: "rgba(255,255,255,0.2)",
+    },
+    heroStat: {
+      flex: 1,
+      alignItems: "center",
+    },
+    heroStatValue: {
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 21,
+      color: colors.white,
+    },
+    heroStatLabel: {
+      marginTop: 4,
+      fontSize: 7,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.9,
+      color: colors.sky400,
+    },
+    heroStatDivider: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: "rgba(255,255,255,0.2)",
+    },
+    sectionHeading: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.xl,
+      marginBottom: spacing.sm,
+    },
+    sectionEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.4,
+      color: colors.warning600,
+    },
+    sectionTitle: {
+      marginTop: 3,
+      fontSize: 18,
+      fontFamily: fontFamily.display,
+      color: colors.mist50,
+    },
+    catalogueBadge: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 5,
+      borderRadius: radii.pill,
+      backgroundColor: colors.warningBg,
+    },
+    catalogueBadgeText: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.8,
+      color: colors.warning600,
+    },
+    courseCard: {
+      flexDirection: "row",
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.md,
+      borderRadius: radii.md,
+      overflow: "hidden",
+      backgroundColor: p.surface,
+      borderWidth: 1,
+      borderColor: p.border,
+      ...shadows.card,
+    },
+    courseCardPressed: {
+      opacity: 0.85,
+      transform: [{ scale: 0.99 }],
+    },
+    courseNumber: {
+      width: 48,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.navy900,
+    },
+    courseNumberText: {
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 15,
+      color: colors.warning600,
+      transform: [{ rotate: "-90deg" }],
+    },
+    courseBody: {
+      flex: 1,
+      padding: spacing.lg,
+    },
+    courseTopRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: spacing.sm,
+    },
+    courseTitleArea: {
+      flex: 1,
+    },
+    courseEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.2,
+      color: p.textTertiary,
+    },
+    courseName: {
+      marginTop: 4,
+      fontSize: 18,
+      lineHeight: 22,
+      fontFamily: fontFamily.display,
+      color: p.textPrimary,
+    },
+    description: {
+      marginTop: spacing.sm,
+      fontSize: 13,
+      lineHeight: 19,
+      color: p.textSecondary,
+    },
+    courseDataStrip: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      marginTop: spacing.lg,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.sm,
+      borderRadius: radii.sm,
+      backgroundColor: p.backgroundAlt,
+    },
+    courseDataItem: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    courseDataText: {
+      flex: 1,
+      marginLeft: spacing.xs,
+    },
+    courseDataLabel: {
+      fontSize: 7,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.8,
+      color: p.textTertiary,
+    },
+    courseDataValue: {
+      marginTop: 2,
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 11,
+      color: p.textPrimary,
+    },
+    courseDataDivider: {
+      width: StyleSheet.hairlineWidth,
+      marginHorizontal: spacing.sm,
+      backgroundColor: p.borderStrong,
+    },
+    courseDataPrice: {
+      minWidth: 68,
+      alignItems: "flex-end",
+      justifyContent: "center",
+    },
+    price: {
+      marginTop: 2,
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 14,
+      color: p.accentPrimary,
+    },
+    courseFooter: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: spacing.md,
+    },
+    courseFooterLine: {
+      flex: 1,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: p.borderStrong,
+    },
+    openCourse: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginLeft: spacing.sm,
+    },
+    openCourseText: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: colors.warning600,
+    },
+    createCourseButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xl,
+      padding: spacing.md,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.deepSeaBorder,
+      backgroundColor: colors.deepSea950,
+    },
+    createCourseButtonPressed: { opacity: 0.8 },
+    createCourseIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: radii.sm,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.ocean600,
+    },
+    createCourseText: { flex: 1, marginLeft: spacing.md },
+    createCourseEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.2,
+      color: colors.sky400,
+    },
+    createCourseTitle: {
+      marginTop: 3,
+      fontSize: 15,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+    },
+    courseCardQualified: { opacity: 0.72 },
+    badgeColumn: { alignItems: "flex-end", gap: 4 },
+    qualifiedRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      marginTop: spacing.sm,
+    },
+    qualifiedText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: colors.success600,
+    },
+    prerequisiteText: {
+      fontSize: 12,
+      fontWeight: "600",
+      color: p.textSecondary,
+    },
+    prerequisiteTextWarning: { color: colors.warning600 },
+  }));
+}
 
 function CourseCard({
   course,
@@ -29,6 +329,7 @@ function CourseCard({
   index: number;
   onPress: () => void;
 }) {
+  const styles = useCoursesStyles();
   const sessionCount = course.sessions.length;
 
   return (
@@ -36,6 +337,7 @@ function CourseCard({
       onPress={onPress}
       style={({ pressed }) => [
         styles.courseCard,
+        course.alreadyQualified && styles.courseCardQualified,
         pressed && styles.courseCardPressed,
       ]}
     >
@@ -53,10 +355,44 @@ function CourseCard({
             <Text style={styles.courseName}>{course.name}</Text>
           </View>
 
-          {course.agency ? (
-            <StatusPill label={course.agency} tone="info" />
-          ) : null}
+          <View style={styles.badgeColumn}>
+            {course.agency ? (
+              <StatusPill label={course.agency} tone="info" />
+            ) : null}
+            {!course.active ? (
+              <StatusPill label="Inactive" tone="neutral" />
+            ) : null}
+          </View>
         </View>
+
+        {course.alreadyQualified ? (
+          <View style={styles.qualifiedRow}>
+            <Ionicons
+              name="checkmark-circle"
+              size={15}
+              color={colors.success600}
+            />
+            <Text style={styles.qualifiedText}>You already have this</Text>
+          </View>
+        ) : course.prerequisiteCertLevel ? (
+          <View style={styles.qualifiedRow}>
+            <Ionicons
+              name="information-circle-outline"
+              size={15}
+              color={course.meetsPrerequisite ? colors.slate600 : colors.warning600}
+            />
+            <Text
+              style={[
+                styles.prerequisiteText,
+                !course.meetsPrerequisite && styles.prerequisiteTextWarning,
+              ]}
+            >
+              Requires{" "}
+              {CERT_LEVEL_LABELS[course.prerequisiteCertLevel] ??
+                course.prerequisiteCertLevel}
+            </Text>
+          </View>
+        ) : null}
 
         {course.description ? (
           <Text style={styles.description} numberOfLines={3}>
@@ -126,6 +462,12 @@ function CourseCard({
 
 export function CoursesScreen() {
   const navigation = useNavigation<any>();
+  const { user } = useAuth();
+  const styles = useCoursesStyles();
+
+  const canCreateCourse =
+    user?.roles.some((role) => CAN_CREATE_COURSE_ROLES.includes(role)) ??
+    false;
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -188,12 +530,7 @@ export function CoursesScreen() {
           <>
             {error && <ErrorBanner message={error} onRetry={load} />}
 
-            <LinearGradient
-              colors={gradients.oceanHeader}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroPanel}
-            >
+            <HeroPanel>
               <View style={styles.heroIcon}>
                 <Ionicons
                   name="school-outline"
@@ -236,7 +573,36 @@ export function CoursesScreen() {
                   <Text style={styles.heroStatLabel}>ENVIRONMENTS</Text>
                 </View>
               </View>
-            </LinearGradient>
+            </HeroPanel>
+
+            {canCreateCourse && (
+              <Pressable
+                onPress={() => navigation.navigate("CreateCourse")}
+                style={({ pressed }) => [
+                  styles.createCourseButton,
+                  pressed && styles.createCourseButtonPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Create a new course"
+              >
+                <View style={styles.createCourseIcon}>
+                  <Ionicons name="add" size={22} color={colors.white} />
+                </View>
+                <View style={styles.createCourseText}>
+                  <Text style={styles.createCourseEyebrow}>
+                    STAFF OPERATION
+                  </Text>
+                  <Text style={styles.createCourseTitle}>
+                    Create new course
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={colors.sky400}
+                />
+              </Pressable>
+            )}
 
             <View style={styles.sectionHeading}>
               <View>
@@ -254,15 +620,11 @@ export function CoursesScreen() {
           </>
         }
         ListEmptyComponent={
-          <View style={styles.emptyPanel}>
-            <Ionicons name="book-outline" size={32} color={colors.ocean600} />
-
-            <Text style={styles.emptyTitle}>No courses available</Text>
-
-            <Text style={styles.emptyBody}>
-              Training programmes will appear here once published.
-            </Text>
-          </View>
+          <EmptyState
+            icon="book-outline"
+            title="No courses available"
+            body="Training programmes will appear here once published."
+          />
         }
         renderItem={({ item, index }) => (
           <CourseCard
@@ -279,278 +641,3 @@ export function CoursesScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.deepSea900,
-  },
-  content: {
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxxl,
-  },
-  heroPanel: {
-    marginHorizontal: spacing.lg,
-    borderRadius: radii.lg,
-    padding: spacing.xl,
-    overflow: "hidden",
-    shadowColor: colors.navy900,
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 7,
-  },
-  heroIcon: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-  },
-  heroText: {
-    marginTop: spacing.lg,
-  },
-  heroEyebrow: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.8,
-    color: colors.sky400,
-  },
-  heroTitle: {
-    marginTop: 4,
-    fontSize: 25,
-    fontWeight: "800",
-    color: colors.white,
-  },
-  heroBody: {
-    marginTop: spacing.sm,
-    maxWidth: 320,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.sand100,
-  },
-  heroStats: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    marginTop: spacing.xl,
-    paddingTop: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.2)",
-  },
-  heroStat: {
-    flex: 1,
-    alignItems: "center",
-  },
-  heroStatValue: {
-    fontFamily: readoutFontFamily,
-    fontSize: 21,
-    fontWeight: "700",
-    color: colors.white,
-  },
-  heroStatLabel: {
-    marginTop: 4,
-    fontSize: 7,
-    fontWeight: "800",
-    letterSpacing: 0.9,
-    color: colors.sky400,
-  },
-  heroStatDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: "rgba(255,255,255,0.2)",
-  },
-  sectionHeading: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    marginBottom: spacing.sm,
-  },
-  sectionEyebrow: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.4,
-    color: colors.warning600,
-  },
-  sectionTitle: {
-    marginTop: 3,
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.mist50,
-  },
-  catalogueBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-    backgroundColor: colors.warningBg,
-  },
-  catalogueBadgeText: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    color: colors.warning600,
-  },
-  courseCard: {
-    flexDirection: "row",
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    borderRadius: radii.md,
-    overflow: "hidden",
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-    shadowColor: colors.navy900,
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  courseCardPressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.99 }],
-  },
-  courseNumber: {
-    width: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.navy900,
-  },
-  courseNumberText: {
-    fontFamily: readoutFontFamily,
-    fontSize: 15,
-    fontWeight: "700",
-    color: colors.warning600,
-    transform: [{ rotate: "-90deg" }],
-  },
-  courseBody: {
-    flex: 1,
-    padding: spacing.lg,
-  },
-  courseTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  courseTitleArea: {
-    flex: 1,
-  },
-  courseEyebrow: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    color: colors.slate400,
-  },
-  courseName: {
-    marginTop: 4,
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "800",
-    color: colors.navy900,
-  },
-  description: {
-    marginTop: spacing.sm,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.slate600,
-  },
-  courseDataStrip: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    marginTop: spacing.lg,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radii.sm,
-    backgroundColor: colors.sand50,
-  },
-  courseDataItem: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  courseDataText: {
-    flex: 1,
-    marginLeft: spacing.xs,
-  },
-  courseDataLabel: {
-    fontSize: 7,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    color: colors.slate400,
-  },
-  courseDataValue: {
-    marginTop: 2,
-    fontFamily: readoutFontFamily,
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.navy900,
-  },
-  courseDataDivider: {
-    width: StyleSheet.hairlineWidth,
-    marginHorizontal: spacing.sm,
-    backgroundColor: colors.slate200,
-  },
-  courseDataPrice: {
-    minWidth: 68,
-    alignItems: "flex-end",
-    justifyContent: "center",
-  },
-  price: {
-    marginTop: 2,
-    fontFamily: readoutFontFamily,
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.ocean600,
-  },
-  courseFooter: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacing.md,
-  },
-  courseFooterLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.slate200,
-  },
-  openCourse: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: spacing.sm,
-  },
-  openCourseText: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.warning600,
-  },
-  emptyPanel: {
-    alignItems: "center",
-    marginHorizontal: spacing.lg,
-    padding: spacing.xl,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-  },
-  emptyTitle: {
-    marginTop: spacing.md,
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.navy900,
-  },
-  emptyBody: {
-    marginTop: spacing.xs,
-    fontSize: 13,
-    color: colors.slate600,
-    textAlign: "center",
-  },
-});

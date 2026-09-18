@@ -17,13 +17,22 @@ import { ErrorBanner } from "../components/ErrorBanner";
 import { GaugeRing } from "../components/GaugeRing";
 import { ScreenHeader } from "../components/ScreenHeader";
 import { StatusPill } from "../components/StatusPill";
-import { colors, spacing } from "../theme";
+import { colors, fontFamily, spacing, useThemedStyles } from "../theme";
 import { formatTripDateFull } from "../utils/format";
+
+const DIVE_TYPE_LABELS: Record<string, string> = {
+  SNORKEL: "Snorkel",
+  SCUBA: "Scuba (max 18m)",
+  DEEP: "Deep dive (18-40m)",
+  BAITED_SHARK_SNORKEL: "Baited shark snorkel",
+  BAITED_SHARK_SCUBA: "Baited shark scuba",
+};
 
 export function TripDetailScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const { tripId } = route.params as { tripId: string };
+  const styles = useTripDetailStyles();
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [booking, setBooking] = useState<Booking | null>(null);
@@ -82,6 +91,26 @@ export function TripDetailScreen() {
     } finally {
       setJoiningWaitlist(false);
     }
+  }
+
+  function goToSelectEquipment() {
+    if (!trip) return;
+    navigation.navigate("SelectEquipment", { tripId: trip.id, trip });
+  }
+
+  function confirmDeepDiveWarningThen(action: () => void) {
+    if (!trip?.requiresCertWarning) {
+      action();
+      return;
+    }
+    Alert.alert(
+      "Deep dive",
+      "This is a deep dive (18-40m) and we don't have a sufficient certification on file for you. Book anyway?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Book anyway", onPress: action },
+      ],
+    );
   }
 
   async function handleClaimWaitlist() {
@@ -212,11 +241,31 @@ export function TripDetailScreen() {
             ) : null}
           </View>
 
+          <Text style={styles.label}>Dive site</Text>
+          <Text style={styles.value}>
+            {trip.site?.name ??
+              (trip.siteEstimated ? "Destination TBD" : "Site not set")}
+          </Text>
+          {trip.siteEstimated ? (
+            <Text style={styles.secondaryValue}>
+              Estimated — confirmed closer to the day
+            </Text>
+          ) : null}
+
+          {trip.diveType ? (
+            <>
+              <Text style={styles.label}>Dive type</Text>
+              <Text style={styles.value}>
+                {DIVE_TYPE_LABELS[trip.diveType] ?? trip.diveType}
+              </Text>
+            </>
+          ) : null}
+
           <Text style={styles.label}>Boat</Text>
           <Text style={styles.value}>{trip.boat.name}</Text>
 
           <Text style={styles.label}>Meet / Launch</Text>
-          <Text style={styles.value}>
+          <Text style={styles.timeValue}>
             {trip.meetTime} meet · {trip.launchTime} launch
           </Text>
 
@@ -275,7 +324,7 @@ export function TripDetailScreen() {
           ) : waitlistEntry?.status === "NOTIFIED" ? (
             <Button
               label="Claim open spot"
-              onPress={handleClaimWaitlist}
+              onPress={() => confirmDeepDiveWarningThen(handleClaimWaitlist)}
               loading={claimingWaitlist}
             />
           ) : waitlistEntry?.status === "WAITING" ? (
@@ -295,12 +344,7 @@ export function TripDetailScreen() {
           ) : (
             <Button
               label="Choose equipment and book"
-              onPress={() =>
-                navigation.navigate("SelectEquipment", {
-                  tripId: trip.id,
-                  trip,
-                })
-              }
+              onPress={() => confirmDeepDiveWarningThen(goToSelectEquipment)}
             />
           )}
         </View>
@@ -309,45 +353,53 @@ export function TripDetailScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: colors.deepSea900 },
-  content: { paddingTop: spacing.lg, paddingBottom: spacing.xxl },
-  loadingPanel: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-    color: colors.slate600,
-    marginTop: spacing.md,
-  },
-  value: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: colors.navy900,
-    marginTop: 2,
-  },
-  secondaryValue: {
-    fontSize: 13,
-    color: colors.slate600,
-    marginTop: 2,
-  },
-  gaugeWrap: {
-    alignItems: "center",
-    marginTop: spacing.xl,
-  },
-  actionRow: {
-    marginHorizontal: spacing.lg,
-    gap: spacing.md,
-  },
-});
+function useTripDetailStyles() {
+  return useThemedStyles((p) => ({
+    fill: { flex: 1, backgroundColor: colors.deepSea900 },
+    content: { paddingTop: spacing.lg, paddingBottom: spacing.xxl },
+    loadingPanel: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    headerRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.sm,
+      marginBottom: spacing.md,
+    },
+    label: {
+      fontSize: 11,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+      color: p.textSecondary,
+      marginTop: spacing.md,
+    },
+    value: {
+      fontSize: 15,
+      fontWeight: "600",
+      color: p.textPrimary,
+      marginTop: 2,
+    },
+    timeValue: {
+      fontSize: 15,
+      fontFamily: fontFamily.readoutBold,
+      color: p.textPrimary,
+      marginTop: 2,
+    },
+    secondaryValue: {
+      fontSize: 13,
+      color: p.textSecondary,
+      marginTop: 2,
+    },
+    gaugeWrap: {
+      alignItems: "center",
+      marginTop: spacing.xl,
+    },
+    actionRow: {
+      marginHorizontal: spacing.lg,
+      gap: spacing.md,
+    },
+  }));
+}

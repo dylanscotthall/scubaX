@@ -248,6 +248,20 @@ enum TripStatus {
   COMPLETED
 }
 
+// The centre's five distinct bookable dive products. DEEP (18-40m) is the
+// only type that ever triggers a certification warning at booking time —
+// SCUBA/BAITED_SHARK_SCUBA stay within the 18m Open Water limit, and the
+// snorkel variants require no certification at all. Deliberately a fixed
+// list, not a raw depth number, since these are named products the centre
+// actually sells, not an open range.
+enum DiveType {
+  SNORKEL
+  SCUBA
+  DEEP
+  BAITED_SHARK_SNORKEL
+  BAITED_SHARK_SCUBA
+}
+
 model Trip {
   id             String       @id @default(uuid())
   organizationId String       @map("organization_id")
@@ -264,6 +278,10 @@ model Trip {
   siteId        String?   @map("site_id")
   site          DiveSite? @relation(fields: [siteId], references: [id])
   siteEstimated Boolean   @default(false) @map("site_estimated")
+
+  // Nullable so existing trips need no backfill; the mobile create-trip form
+  // treats this as a required picker for new trips going forward.
+  diveType DiveType? @map("dive_type")
 
   tripDate   DateTime @map("trip_date") // date only, semantically
   meetTime   String   @map("meet_time")
@@ -312,12 +330,45 @@ model Booking {
   bookedAt    DateTime      @default(now()) @map("booked_at")
   cancelledAt DateTime?     @map("cancelled_at")
 
+  // Total seats occupied by this booking: the booker plus all guests. Kept in
+  // sync with `guests.length` inside the same transaction that writes guest
+  // rows, rather than computed on the fly, so capacity checks are a cheap
+  // aggregate instead of an extra join/count on every trip-list/booking call.
+  partySize Int @default(1) @map("party_size")
+
   equipmentRequests BookingEquipmentRequest[]
+  guests            BookingGuest[]
   payments          Payment[]
 
   @@unique([tripId, userId])
   @@index([tripId])
   @@map("bookings")
+}
+
+// A guest travelling under a booker's booking. Guests do not have accounts;
+// `label` is booker-supplied and optional — a null label falls back to
+// "Guest N" (derived from `position`) wherever guests are displayed.
+model BookingGuest {
+  id String @id @default(uuid())
+
+  bookingId String  @map("booking_id")
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  // 1-based order in which the guest was added for this booking. Used to
+  // derive "Guest 1", "Guest 2", ... when label is null, and gives a stable
+  // sort order independent of createdAt precision.
+  position Int
+
+  label String? @map("label")
+
+  equipmentRequests BookingGuestEquipmentRequest[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([bookingId, position])
+  @@index([bookingId])
+  @@map("booking_guests")
 }
 
 // Waitlist for a FULL trip. Decision: "open race" — when a spot frees up,
@@ -361,6 +412,16 @@ model Course {
   agency                CertAgency?
   prerequisiteCertLevel CertLevel?  @map("prerequisite_cert_level")
   price                 Decimal?    @db.Decimal(10, 2)
+
+  // Retired rather than hard-deleted once it has ever had an enrollment —
+  // same "keep history, hide from new bookings" pattern as EquipmentItem.
+  active Boolean @default(true)
+
+  // What this course teaches toward — mirrors the certLevel/certSpecialties
+  // split already on User. A course sets at most one of the two (enforced
+  // in the create/update schema, not here).
+  grantsCertLevel CertLevel? @map("grants_cert_level")
+  grantsSpecialty String?    @map("grants_specialty")
 
   instructorId String @map("instructor_id")
   instructor   User   @relation("CourseInstructor", fields: [instructorId], references: [id])
@@ -449,6 +510,11 @@ enum CylinderForm {
   TALL
 }
 
+enum WeightCarryMethod {
+  BELT
+  POCKETS
+}
+
 enum FinStyle {
   OPEN_HEEL
   FULL_FOOT
@@ -469,7 +535,8 @@ model EquipmentItem {
   active       Boolean           @default(true)
   displayOrder Int               @default(0) @map("display_order")
 
-  bookingRequests BookingEquipmentRequest[]
+  bookingRequests      BookingEquipmentRequest[]
+  bookingGuestRequests BookingGuestEquipmentRequest[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -493,9 +560,10 @@ model UserEquipmentProfile {
   preferredCylinderVolumeLitres Int?          @map("preferred_cylinder_volume_litres")
   preferredCylinderForm         CylinderForm? @map("preferred_cylinder_form")
 
-  preferredWeightKg Decimal?  @map("preferred_weight_kg") @db.Decimal(4, 1)
-  shoeSizeUk        Decimal?  @map("shoe_size_uk") @db.Decimal(3, 1)
-  finStyle          FinStyle? @map("fin_style")
+  preferredWeightKg          Decimal?           @map("preferred_weight_kg") @db.Decimal(4, 1)
+  preferredWeightCarryMethod WeightCarryMethod? @map("preferred_weight_carry_method")
+  shoeSizeUk                 Decimal?           @map("shoe_size_uk") @db.Decimal(3, 1)
+  finStyle                   FinStyle?          @map("fin_style")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -526,7 +594,8 @@ model BookingEquipmentRequest {
   cylinderForm         CylinderForm? @map("cylinder_form")
 
   // Total lead requested, measured in kilograms.
-  requestedWeightKg Decimal? @map("requested_weight_kg") @db.Decimal(4, 1)
+  requestedWeightKg Decimal?           @map("requested_weight_kg") @db.Decimal(4, 1)
+  weightCarryMethod WeightCarryMethod? @map("weight_carry_method")
 
   // Used by fin requests.
   shoeSizeUk Decimal?  @map("shoe_size_uk") @db.Decimal(3, 1)
@@ -542,6 +611,44 @@ model BookingEquipmentRequest {
   @@index([equipmentItemId, requestedSize])
   @@index([gasType, nitroxPercent])
   @@map("booking_equipment_requests")
+}
+
+// A snapshot of what was requested for one guest of one booking. Field-for-
+// field mirror of BookingEquipmentRequest, scoped to a BookingGuest instead
+// of a Booking, since guests are not Users and cannot own a booking directly.
+model BookingGuestEquipmentRequest {
+  id String @id @default(uuid())
+
+  bookingGuestId String       @map("booking_guest_id")
+  bookingGuest   BookingGuest @relation(fields: [bookingGuestId], references: [id], onDelete: Cascade)
+
+  equipmentItemId String        @map("equipment_item_id")
+  equipmentItem   EquipmentItem @relation(fields: [equipmentItemId], references: [id], onDelete: Restrict)
+
+  quantity Int @default(1)
+
+  requestedSize String? @map("requested_size")
+
+  gasType              GasType?      @map("gas_type")
+  nitroxPercent        Int?          @map("nitrox_percent")
+  cylinderVolumeLitres Int?          @map("cylinder_volume_litres")
+  cylinderForm         CylinderForm? @map("cylinder_form")
+
+  requestedWeightKg Decimal?           @map("requested_weight_kg") @db.Decimal(4, 1)
+  weightCarryMethod WeightCarryMethod? @map("weight_carry_method")
+
+  shoeSizeUk Decimal?  @map("shoe_size_uk") @db.Decimal(3, 1)
+  finStyle   FinStyle? @map("fin_style")
+
+  clientNote String? @map("client_note")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([bookingGuestId, equipmentItemId])
+  @@index([equipmentItemId, requestedSize])
+  @@index([gasType, nitroxPercent])
+  @@map("booking_guest_equipment_requests")
 }
 
 // ---------------------------------------------------------------------------

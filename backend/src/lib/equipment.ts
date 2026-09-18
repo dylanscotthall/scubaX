@@ -1,5 +1,6 @@
 import {
   BookingEquipmentRequest,
+  BookingGuestEquipmentRequest,
   CylinderForm,
   EquipmentCategory,
   EquipmentItem,
@@ -7,6 +8,7 @@ import {
   GasType,
   Prisma,
   UserEquipmentProfile,
+  WeightCarryMethod,
 } from "../generated/prisma/client";
 import { z } from "zod";
 import { HttpError } from "./http";
@@ -22,6 +24,7 @@ export const equipmentSelectionSchema = z
     cylinderVolumeLitres: z.number().int().min(1).max(30).optional(),
     cylinderForm: z.nativeEnum(CylinderForm).optional(),
     requestedWeightKg: z.number().positive().max(40).multipleOf(0.5).optional(),
+    weightCarryMethod: z.nativeEnum(WeightCarryMethod).optional(),
     shoeSizeUk: z.number().min(1).max(16).multipleOf(0.5).optional(),
     finStyle: z.nativeEnum(FinStyle).optional(),
     clientNote: nullableTrimmedString(500),
@@ -40,6 +43,24 @@ export const equipmentRequestListSchema = z
   .array(equipmentRequestInputSchema)
   .max(20, "A booking cannot contain more than 20 equipment request rows")
   .default([]);
+
+// A guest travelling under a booker's booking. Guests do not have accounts,
+// so `label` is a free-text, booker-supplied name — a blank/omitted label
+// falls back to "Guest N" wherever guests are displayed (see
+// serializeBookingGuest), never stored as a generated string.
+export const bookingGuestInputSchema = z
+  .object({
+    label: z.string().trim().min(1).max(40).nullable().optional(),
+    equipment: equipmentRequestListSchema,
+  })
+  .strict();
+
+export const bookingGuestListSchema = z
+  .array(bookingGuestInputSchema)
+  .max(19, "A booking cannot bring more than 19 guests")
+  .default([]);
+
+export type BookingGuestInput = z.infer<typeof bookingGuestInputSchema>;
 
 export const equipmentProfileInputSchema = z
   .object({
@@ -66,6 +87,10 @@ export const equipmentProfileInputSchema = z
       .positive()
       .max(40)
       .multipleOf(0.5)
+      .nullable()
+      .default(null),
+    preferredWeightCarryMethod: z
+      .nativeEnum(WeightCarryMethod)
       .nullable()
       .default(null),
     shoeSizeUk: z
@@ -124,6 +149,25 @@ export const equipmentProfileInputSchema = z
           "Cylinder preferences require gas type, cylinder volume and cylinder form together",
       });
     }
+
+    // Same all-or-nothing grouping as cylinder preferences above — a weight
+    // preference without a carry method (or vice versa) is ambiguous, so
+    // require both together rather than silently defaulting one.
+    const hasAnyWeightPreference =
+      value.preferredWeightKg != null ||
+      value.preferredWeightCarryMethod != null;
+    const hasRequiredWeightPreference =
+      value.preferredWeightKg != null &&
+      value.preferredWeightCarryMethod != null;
+
+    if (hasAnyWeightPreference && !hasRequiredWeightPreference) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["preferredWeightKg"],
+        message:
+          "Weight preferences require both preferredWeightKg and preferredWeightCarryMethod together",
+      });
+    }
   });
 
 export type EquipmentRequestInput = z.infer<typeof equipmentRequestInputSchema>;
@@ -138,6 +182,7 @@ const structuredSelectionKeys = [
   "cylinderVolumeLitres",
   "cylinderForm",
   "requestedWeightKg",
+  "weightCarryMethod",
   "shoeSizeUk",
   "finStyle",
 ] as const;
@@ -238,7 +283,10 @@ function requestDataForItem(
     }
 
     case EquipmentCategory.WEIGHTS: {
-      rejectUnexpectedFields(item, selection, ["requestedWeightKg"]);
+      rejectUnexpectedFields(item, selection, [
+        "requestedWeightKg",
+        "weightCarryMethod",
+      ]);
       if (input.quantity !== 1) {
         throw new HttpError(
           400,
@@ -248,9 +296,13 @@ function requestDataForItem(
       if (selection.requestedWeightKg == null) {
         throw new HttpError(400, `${item.name} requires requestedWeightKg`);
       }
+      if (!selection.weightCarryMethod) {
+        throw new HttpError(400, `${item.name} requires weightCarryMethod`);
+      }
       return {
         ...common,
         requestedWeightKg: selection.requestedWeightKg,
+        weightCarryMethod: selection.weightCarryMethod,
       };
     }
 
@@ -285,18 +337,19 @@ function requestDataForItem(
   }
 }
 
-export async function prepareEquipmentRequestRows(
+// Generic core shared by booker-owned and guest-owned equipment: validates
+// duplicate item IDs, loads+validates catalogue items, and shapes structured
+// fields via requestDataForItem. Returns rows with no owner foreign key
+// attached — callers attach bookingId or bookingGuestId themselves.
+async function shapeEquipmentRequestRows(
   tx: Prisma.TransactionClient,
   organizationId: string,
-  bookingId: string,
   inputs: EquipmentRequestInput[],
-): Promise<Prisma.BookingEquipmentRequestCreateManyInput[]> {
+  duplicateErrorMessage: string,
+): Promise<Array<Omit<Prisma.BookingEquipmentRequestCreateManyInput, "bookingId">>> {
   const ids = inputs.map((input) => input.equipmentItemId);
   if (new Set(ids).size !== ids.length) {
-    throw new HttpError(
-      400,
-      "Each equipment item may only appear once per booking",
-    );
+    throw new HttpError(400, duplicateErrorMessage);
   }
 
   if (inputs.length === 0) return [];
@@ -325,11 +378,38 @@ export async function prepareEquipmentRequestRows(
       throw new HttpError(400, "Equipment catalogue validation failed");
     }
 
-    return {
-      bookingId,
-      ...requestDataForItem(item, input),
-    };
+    return requestDataForItem(item, input);
   });
+}
+
+export async function prepareEquipmentRequestRows(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  bookingId: string,
+  inputs: EquipmentRequestInput[],
+): Promise<Prisma.BookingEquipmentRequestCreateManyInput[]> {
+  const rows = await shapeEquipmentRequestRows(
+    tx,
+    organizationId,
+    inputs,
+    "Each equipment item may only appear once per booking",
+  );
+  return rows.map((row) => ({ bookingId, ...row }));
+}
+
+export async function prepareGuestEquipmentRequestRows(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  bookingGuestId: string,
+  inputs: EquipmentRequestInput[],
+): Promise<Prisma.BookingGuestEquipmentRequestCreateManyInput[]> {
+  const rows = await shapeEquipmentRequestRows(
+    tx,
+    organizationId,
+    inputs,
+    "Each equipment item may only appear once per guest",
+  );
+  return rows.map((row) => ({ bookingGuestId, ...row }));
 }
 
 export function serializeEquipmentProfile(
@@ -344,6 +424,7 @@ export function serializeEquipmentProfile(
       preferredCylinderVolumeLitres: null,
       preferredCylinderForm: null,
       preferredWeightKg: null,
+      preferredWeightCarryMethod: null,
       shoeSizeUk: null,
       finStyle: null,
     };
@@ -360,6 +441,7 @@ export function serializeEquipmentProfile(
       profile.preferredWeightKg == null
         ? null
         : Number(profile.preferredWeightKg),
+    preferredWeightCarryMethod: profile.preferredWeightCarryMethod,
     shoeSizeUk: profile.shoeSizeUk == null ? null : Number(profile.shoeSizeUk),
     finStyle: profile.finStyle,
   };
@@ -384,10 +466,55 @@ export function serializeEquipmentRequest(request: RequestWithItem) {
       request.requestedWeightKg == null
         ? null
         : Number(request.requestedWeightKg),
+    weightCarryMethod: request.weightCarryMethod,
     shoeSizeUk: request.shoeSizeUk == null ? null : Number(request.shoeSizeUk),
     finStyle: request.finStyle,
     clientNote: request.clientNote,
     createdAt: request.createdAt,
     updatedAt: request.updatedAt,
+  };
+}
+
+type GuestRequestWithItem = BookingGuestEquipmentRequest & {
+  equipmentItem: Pick<EquipmentItem, "id" | "slug" | "name" | "category">;
+};
+
+export function serializeGuestEquipmentRequest(request: GuestRequestWithItem) {
+  return {
+    id: request.id,
+    bookingGuestId: request.bookingGuestId,
+    quantity: request.quantity,
+    equipmentItem: request.equipmentItem,
+    requestedSize: request.requestedSize,
+    gasType: request.gasType,
+    nitroxPercent: request.nitroxPercent,
+    cylinderVolumeLitres: request.cylinderVolumeLitres,
+    cylinderForm: request.cylinderForm,
+    requestedWeightKg:
+      request.requestedWeightKg == null
+        ? null
+        : Number(request.requestedWeightKg),
+    weightCarryMethod: request.weightCarryMethod,
+    shoeSizeUk: request.shoeSizeUk == null ? null : Number(request.shoeSizeUk),
+    finStyle: request.finStyle,
+    clientNote: request.clientNote,
+    createdAt: request.createdAt,
+    updatedAt: request.updatedAt,
+  };
+}
+
+export function serializeBookingGuest(guest: {
+  id: string;
+  bookingId: string;
+  position: number;
+  label: string | null;
+  equipmentRequests: GuestRequestWithItem[];
+}) {
+  return {
+    id: guest.id,
+    bookingId: guest.bookingId,
+    position: guest.position,
+    label: guest.label ?? `Guest ${guest.position}`,
+    equipmentRequests: guest.equipmentRequests.map(serializeGuestEquipmentRequest),
   };
 }

@@ -3,7 +3,11 @@ import { z } from "zod";
 import {
   AppRole,
   BookingStatus,
+  CertLevel,
+  CylinderForm,
+  DiveType,
   EquipmentCategory,
+  FinStyle,
   GasType,
   Prisma,
   TripStatus,
@@ -13,7 +17,8 @@ import { prisma } from "../lib/prisma";
 import { asyncRoute, HttpError } from "../lib/http";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { notifySiteFollowers, notifyTripCancelled } from "../lib/notify";
-import { clientBookingCapacity } from "../lib/capacity";
+import { clientBookingCapacity, confirmedOccupiedSeats } from "../lib/capacity";
+import { deepDiveWarningApplies } from "../lib/certification";
 
 const router = Router();
 
@@ -49,16 +54,20 @@ const tripPublicInclude = {
       minCertLevel: true,
     },
   },
-  _count: {
-    select: {
-      bookings: { where: { status: BookingStatus.CONFIRMED } },
-    },
-  },
 } as const;
 
 type PublicTrip = Prisma.TripGetPayload<{ include: typeof tripPublicInclude }>;
 
-function serializeTrip(trip: PublicTrip) {
+// occupiedSeats counts every seat taken by CONFIRMED bookings on this trip,
+// including guests, not just the number of booking rows — see
+// confirmedOccupiedSeats. viewerCertLevel is the requesting user's own
+// certLevel, used only to compute requiresCertWarning for THEM — it is not
+// stored on the trip and never shown to anyone else.
+function serializeTrip(
+  trip: PublicTrip,
+  occupiedSeats: number,
+  viewerCertLevel: CertLevel | null,
+) {
   const boatCapacity = trip.capacityOverride ?? trip.boat.capacity;
   const capacity = clientBookingCapacity(boatCapacity);
   return {
@@ -68,6 +77,8 @@ function serializeTrip(trip: PublicTrip) {
     meetTime: trip.meetTime,
     launchTime: trip.launchTime,
     siteEstimated: trip.siteEstimated,
+    diveType: trip.diveType,
+    requiresCertWarning: deepDiveWarningApplies(trip.diveType, viewerCertLevel),
     capacityOverride: trip.capacityOverride,
     capacity,
     boatCapacity,
@@ -77,8 +88,8 @@ function serializeTrip(trip: PublicTrip) {
     boat: trip.boat,
     launchSite: trip.launchSite,
     site: trip.site,
-    confirmedCount: trip._count.bookings,
-    spotsTaken: trip._count.bookings,
+    confirmedCount: occupiedSeats,
+    spotsTaken: occupiedSeats,
   };
 }
 
@@ -132,7 +143,33 @@ router.get(
       orderBy: [{ tripDate: "asc" }, { launchTime: "asc" }],
     });
 
-    return res.json({ trips: trips.map(serializeTrip) });
+    const [occupiedSeatsByTrip, viewer] = await Promise.all([
+      prisma.booking.groupBy({
+        by: ["tripId"],
+        where: {
+          tripId: { in: trips.map((trip) => trip.id) },
+          status: BookingStatus.CONFIRMED,
+        },
+        _sum: { partySize: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: req.auth!.userId },
+        select: { certLevel: true },
+      }),
+    ]);
+    const occupiedSeatsById = new Map(
+      occupiedSeatsByTrip.map((row) => [row.tripId, row._sum.partySize ?? 0]),
+    );
+
+    return res.json({
+      trips: trips.map((trip) =>
+        serializeTrip(
+          trip,
+          occupiedSeatsById.get(trip.id) ?? 0,
+          viewer?.certLevel ?? null,
+        ),
+      ),
+    });
   }),
 );
 
@@ -164,6 +201,7 @@ router.get(
         tripDate: true,
         meetTime: true,
         launchTime: true,
+        diveType: true,
         boat: { select: { id: true, name: true } },
         launchSite: { select: { id: true, name: true, address: true } },
         site: { select: { id: true, name: true } },
@@ -173,6 +211,28 @@ router.get(
       return res.status(404).json({ error: "Trip not found" });
     }
 
+    const equipmentRequestFieldSelect = {
+      id: true,
+      quantity: true,
+      requestedSize: true,
+      gasType: true,
+      nitroxPercent: true,
+      cylinderVolumeLitres: true,
+      cylinderForm: true,
+      requestedWeightKg: true,
+      shoeSizeUk: true,
+      finStyle: true,
+      clientNote: true,
+      equipmentItem: {
+        select: {
+          id: true,
+          slug: true,
+          name: true,
+          category: true,
+        },
+      },
+    } as const;
+
     const bookings = await prisma.booking.findMany({
       where: {
         tripId: trip.id,
@@ -180,6 +240,7 @@ router.get(
       },
       select: {
         id: true,
+        partySize: true,
         user: {
           select: {
             id: true,
@@ -190,60 +251,97 @@ router.get(
           },
         },
         equipmentRequests: {
+          select: equipmentRequestFieldSelect,
+          orderBy: { createdAt: "asc" },
+        },
+        guests: {
           select: {
             id: true,
-            quantity: true,
-            requestedSize: true,
-            gasType: true,
-            nitroxPercent: true,
-            cylinderVolumeLitres: true,
-            cylinderForm: true,
-            requestedWeightKg: true,
-            shoeSizeUk: true,
-            finStyle: true,
-            clientNote: true,
-            equipmentItem: {
-              select: {
-                id: true,
-                slug: true,
-                name: true,
-                category: true,
-              },
+            position: true,
+            label: true,
+            equipmentRequests: {
+              select: equipmentRequestFieldSelect,
+              orderBy: { createdAt: "asc" },
             },
           },
-          orderBy: { createdAt: "asc" },
+          orderBy: { position: "asc" },
         },
       },
       orderBy: { bookedAt: "asc" },
     });
 
+    type EquipmentRequestFields = {
+      id: string;
+      quantity: number;
+      requestedSize: string | null;
+      gasType: GasType | null;
+      nitroxPercent: number | null;
+      cylinderVolumeLitres: number | null;
+      cylinderForm: CylinderForm | null;
+      requestedWeightKg: Prisma.Decimal | null;
+      shoeSizeUk: Prisma.Decimal | null;
+      finStyle: FinStyle | null;
+      clientNote: string | null;
+      equipmentItem: {
+        id: string;
+        slug: string;
+        name: string;
+        category: EquipmentCategory;
+      };
+    };
+
+    function shapeRequest(request: EquipmentRequestFields) {
+      return {
+        id: request.id,
+        equipmentItem: request.equipmentItem,
+        quantity: request.quantity,
+        requestedSize: request.requestedSize,
+        gasType: request.gasType,
+        nitroxPercent: request.nitroxPercent,
+        cylinderVolumeLitres: request.cylinderVolumeLitres,
+        cylinderForm: request.cylinderForm,
+        requestedWeightKg:
+          request.requestedWeightKg == null
+            ? null
+            : Number(request.requestedWeightKg),
+        shoeSizeUk:
+          request.shoeSizeUk == null ? null : Number(request.shoeSizeUk),
+        finStyle: request.finStyle,
+        clientNote: request.clientNote,
+      };
+    }
+
     const normalizedSize = query.data.size?.toUpperCase();
     const requests = bookings
-      .flatMap((booking) =>
-        booking.equipmentRequests.map((request) => ({
-          id: request.id,
+      .flatMap((booking) => {
+        const client = {
+          ...booking.user,
+          name: `${booking.user.firstName} ${booking.user.lastName}`.trim(),
+        };
+
+        const ownRows = booking.equipmentRequests.map((request) => ({
+          ...shapeRequest(request),
           bookingId: booking.id,
-          client: {
-            ...booking.user,
-            name: `${booking.user.firstName} ${booking.user.lastName}`.trim(),
-          },
-          equipmentItem: request.equipmentItem,
-          quantity: request.quantity,
-          requestedSize: request.requestedSize,
-          gasType: request.gasType,
-          nitroxPercent: request.nitroxPercent,
-          cylinderVolumeLitres: request.cylinderVolumeLitres,
-          cylinderForm: request.cylinderForm,
-          requestedWeightKg:
-            request.requestedWeightKg == null
-              ? null
-              : Number(request.requestedWeightKg),
-          shoeSizeUk:
-            request.shoeSizeUk == null ? null : Number(request.shoeSizeUk),
-          finStyle: request.finStyle,
-          clientNote: request.clientNote,
-        })),
-      )
+          client,
+          owner: { type: "SELF" as const, label: client.name },
+        }));
+
+        const guestRows = booking.guests.flatMap((guest) =>
+          guest.equipmentRequests.map((request) => ({
+            ...shapeRequest(request),
+            bookingId: booking.id,
+            client,
+            owner: {
+              type: "GUEST" as const,
+              label: guest.label ?? `Guest ${guest.position}`,
+              bookingGuestId: guest.id,
+              position: guest.position,
+            },
+          })),
+        );
+
+        return [...ownRows, ...guestRows];
+      })
       .filter((request) => {
         if (
           query.data.category &&
@@ -270,6 +368,10 @@ router.get(
       cylinders: {} as Record<string, number>,
       totalWeightKg: 0,
       fins: {} as Record<string, number>,
+      totalPartySize: bookings.reduce(
+        (sum, booking) => sum + booking.partySize,
+        0,
+      ),
     };
 
     for (const request of requests) {
@@ -344,7 +446,16 @@ router.get(
       return res.status(404).json({ error: "Trip not found" });
     }
 
-    return res.json({ trip: serializeTrip(trip) });
+    const [occupiedSeats, viewer] = await Promise.all([
+      confirmedOccupiedSeats(prisma, trip.id),
+      prisma.user.findUnique({
+        where: { id: req.auth!.userId },
+        select: { certLevel: true },
+      }),
+    ]);
+    return res.json({
+      trip: serializeTrip(trip, occupiedSeats, viewer?.certLevel ?? null),
+    });
   }),
 );
 
@@ -354,6 +465,7 @@ const createTripSchema = z
     launchSiteId: z.string().guid().nullable().optional(),
     siteId: z.string().guid().nullable().optional(),
     siteEstimated: z.boolean().optional(),
+    diveType: z.nativeEnum(DiveType).nullable().optional(),
     tripDate: z.iso.date(),
     meetTime: z.iso.time({ precision: -1 }),
     launchTime: z.iso.time({ precision: -1 }),
@@ -436,6 +548,7 @@ router.post(
         launchSiteId: data.launchSiteId ?? null,
         siteId: data.siteId ?? null,
         siteEstimated: data.siteEstimated ?? !data.siteId,
+        diveType: data.diveType ?? null,
         tripDate: new Date(`${data.tripDate}T00:00:00.000Z`),
         meetTime: data.meetTime,
         launchTime: data.launchTime,
@@ -450,7 +563,13 @@ router.post(
       await notifySiteFollowers(trip.organizationId, trip.siteId, trip.id);
     }
 
-    return res.status(201).json({ trip: serializeTrip(trip) });
+    const creator = await prisma.user.findUnique({
+      where: { id: req.auth!.userId },
+      select: { certLevel: true },
+    });
+    return res
+      .status(201)
+      .json({ trip: serializeTrip(trip, 0, creator?.certLevel ?? null) });
   }),
 );
 

@@ -1,7 +1,7 @@
 import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
-import { colors, spacing, readoutFontFamily } from "../theme";
+import { fontFamily, useThemedStyles, useTheme, SemanticPalette } from "../theme";
 
 interface GaugeRingProps {
   value: number;
@@ -54,24 +54,25 @@ function describeDonutSegment(
   ].join(" ");
 }
 
-function getCapacityColor(value: number) {
+function getCapacityColor(value: number, palette: SemanticPalette) {
   if (value >= 0.9) {
-    return colors.danger600;
+    return palette.danger;
   }
 
   if (value >= 0.75) {
-    return colors.warning600;
+    return palette.warning;
   }
 
   if (value >= 0.5) {
-    return colors.success600;
+    // Premium "healthy/best" highlight instead of a generic green
+    return palette.accentGlow;
   }
 
   if (value >= 0.25) {
-    return colors.ocean600;
+    return palette.accentPrimary;
   }
 
-  return colors.sky400;
+  return palette.accentPrimaryPressed;
 }
 
 export function GaugeRing({
@@ -79,10 +80,42 @@ export function GaugeRing({
   label,
   valueLabel,
   color,
-  centerColor = colors.white,
+  centerColor,
   size = 84,
   slots = 8,
 }: GaugeRingProps) {
+  const { palette } = useTheme();
+  const styles = useThemedStyles((p) => ({
+    wrap: {
+      alignItems: "center",
+    },
+    centerLabel: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    valueText: {
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 13,
+      textAlign: "center",
+      paddingHorizontal: 4,
+    },
+    label: {
+      paddingTop: 10,
+      fontSize: 11,
+      fontFamily: fontFamily.displayMedium,
+      color: p.textSecondary,
+      marginTop: 4,
+      textAlign: "center",
+      textTransform: "uppercase",
+      letterSpacing: 0.3,
+    },
+  }));
+
   const center = size / 2;
   const outerRadius = size / 2;
   const innerRadius = size * 0.28;
@@ -95,7 +128,8 @@ export function GaugeRing({
   const slotAngle = 360 / safeSlots;
   const gapAngle = Math.min(4, slotAngle * 0.18);
 
-  const activeColor = color ?? getCapacityColor(clamped);
+  const activeColor = color ?? getCapacityColor(clamped, palette);
+  const resolvedCenterColor = centerColor ?? palette.surface;
 
   return (
     <View style={styles.wrap}>
@@ -119,7 +153,7 @@ export function GaugeRing({
                   startAngle,
                   endAngle,
                 )}
-                fill={isFilled ? activeColor : colors.sand100}
+                fill={isFilled ? activeColor : palette.surfaceAlt}
               />
             );
           })}
@@ -128,7 +162,7 @@ export function GaugeRing({
             cx={center}
             cy={center}
             r={innerRadius - 1}
-            fill={centerColor}
+            fill={resolvedCenterColor}
           />
         </Svg>
 
@@ -147,35 +181,3 @@ export function GaugeRing({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: {
-    alignItems: "center",
-  },
-  centerLabel: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  valueText: {
-    fontFamily: readoutFontFamily,
-    fontSize: 13,
-    fontWeight: "700",
-    textAlign: "center",
-    paddingHorizontal: 4,
-  },
-  label: {
-    paddingTop: 10,
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.slate600,
-    marginTop: spacing.xs,
-    textAlign: "center",
-    textTransform: "uppercase",
-    letterSpacing: 0.3,
-  },
-});

@@ -4,7 +4,7 @@ import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
-import { colors } from "../theme";
+import { colors, useTheme } from "../theme";
 import { useAuth } from "../context/AuthContext";
 
 import { LoginScreen } from "../screens/LoginScreen";
@@ -15,6 +15,8 @@ import { CreateLaunchScreen } from "../screens/CreateLaunchScreen";
 import { SelectEquipmentScreen } from "../screens/SelectEquipmentScreen";
 import { CoursesScreen } from "../screens/CoursesScreen";
 import { CourseDetailScreen } from "../screens/CourseDetailScreen";
+import { CreateCourseScreen } from "../screens/CreateCourseScreen";
+import { ProfileScreen } from "../screens/ProfileScreen";
 import { ConditionsScreen } from "../screens/ConditionsScreen";
 import { StaffEquipmentScreen } from "../screens/StaffEquipmentScreen";
 
@@ -36,6 +38,7 @@ function HomeStackNavigator() {
         component={SelectEquipmentScreen}
       />
       <HomeStack.Screen name="CourseDetail" component={CourseDetailScreen} />
+      <HomeStack.Screen name="Profile" component={ProfileScreen} />
     </HomeStack.Navigator>
   );
 }
@@ -59,18 +62,21 @@ function CoursesStackNavigator() {
     <CoursesStack.Navigator screenOptions={{ headerShown: false }}>
       <CoursesStack.Screen name="CoursesMain" component={CoursesScreen} />
       <CoursesStack.Screen name="CourseDetail" component={CourseDetailScreen} />
+      <CoursesStack.Screen name="CreateCourse" component={CreateCourseScreen} />
     </CoursesStack.Navigator>
   );
 }
 
 function MainTabs() {
   const { user } = useAuth();
+  // Tab bar stays on the dive-computer dark chrome in both light and dark app mode.
+  const { palette } = useTheme();
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: colors.sky400,
+        tabBarActiveTintColor: palette.accentGlow,
         tabBarInactiveTintColor: colors.mist400,
         tabBarStyle: {
           backgroundColor: colors.deepSea950,

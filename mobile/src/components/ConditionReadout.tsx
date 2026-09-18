@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import Svg, {
   Circle,
   Defs,
@@ -9,7 +9,7 @@ import Svg, {
   Rect,
   Stop,
 } from "react-native-svg";
-import { colors, readoutFontFamily, spacing } from "../theme";
+import { colors, fontFamily, spacing, useThemedStyles, useTheme } from "../theme";
 
 export type ConditionType =
   | "waveHeight"
@@ -345,10 +345,12 @@ function WaveHeightIcon({
   value,
   size,
   color,
+  trackColor,
 }: {
   value: number;
   size: number;
   color: string;
+  trackColor: string;
 }) {
   const normalized = clamp(value / 3);
   const amplitude = 4 + normalized * 10;
@@ -389,7 +391,7 @@ function WaveHeightIcon({
         y1={size - 5}
         x2={size - 4}
         y2={size - 5}
-        stroke={colors.sand100}
+        stroke={trackColor}
         strokeWidth={2}
       />
     </Svg>
@@ -400,10 +402,12 @@ function WavePeriodIcon({
   value,
   size,
   color,
+  trackColor,
 }: {
   value: number;
   size: number;
   color: string;
+  trackColor: string;
 }) {
   const normalized = clamp((value - 3) / 13);
 
@@ -442,7 +446,7 @@ function WavePeriodIcon({
         y1={size * 0.77}
         x2={size * 0.82}
         y2={size * 0.77}
-        stroke={colors.slate400}
+        stroke={trackColor}
         strokeWidth={1.5}
       />
 
@@ -451,7 +455,7 @@ function WavePeriodIcon({
         y1={size * 0.71}
         x2={size * 0.18}
         y2={size * 0.83}
-        stroke={colors.slate400}
+        stroke={trackColor}
         strokeWidth={1.5}
       />
 
@@ -460,7 +464,7 @@ function WavePeriodIcon({
         y1={size * 0.71}
         x2={size * 0.82}
         y2={size * 0.83}
-        stroke={colors.slate400}
+        stroke={trackColor}
         strokeWidth={1.5}
       />
     </Svg>
@@ -525,11 +529,13 @@ function ThermometerIcon({
   size,
   color,
   gradientId,
+  trackColor,
 }: {
   value: number;
   size: number;
   color: string;
   gradientId: string;
+  trackColor: string;
 }) {
   const normalized = clamp((value - 5) / 30);
 
@@ -557,7 +563,7 @@ function ThermometerIcon({
         width={tubeWidth}
         height={tubeHeight}
         rx={tubeWidth / 2}
-        fill={colors.sand100}
+        fill={trackColor}
       />
 
       <Rect
@@ -578,7 +584,7 @@ function ThermometerIcon({
           y1={size * position}
           x2={size * 0.73}
           y2={size * position}
-          stroke={colors.slate600}
+          stroke={trackColor}
           strokeWidth={1.5}
           strokeLinecap="round"
           opacity={0.5}
@@ -645,10 +651,12 @@ function PressureIcon({
   value,
   size,
   color,
+  trackColor,
 }: {
   value: number;
   size: number;
   color: string;
+  trackColor: string;
 }) {
   const normalized = clamp((value - 980) / 60);
   const center = size / 2;
@@ -664,7 +672,7 @@ function PressureIcon({
 
   return (
     <Svg width={size} height={size}>
-      <Circle cx={center} cy={center} r={radius} fill={colors.sand100} />
+      <Circle cx={center} cy={center} r={radius} fill={trackColor} />
 
       <Circle
         cx={center}
@@ -695,18 +703,20 @@ function ConditionIcon({
   value,
   size,
   color,
+  trackColor,
 }: {
   type: ConditionType;
   value: number;
   size: number;
   color: string;
+  trackColor: string;
 }) {
   switch (type) {
     case "waveHeight":
-      return <WaveHeightIcon value={value} size={size} color={color} />;
+      return <WaveHeightIcon value={value} size={size} color={color} trackColor={trackColor} />;
 
     case "wavePeriod":
-      return <WavePeriodIcon value={value} size={size} color={color} />;
+      return <WavePeriodIcon value={value} size={size} color={color} trackColor={trackColor} />;
 
     case "windSpeed":
       return <WindIcon value={value} size={size} color={color} />;
@@ -718,6 +728,7 @@ function ConditionIcon({
           size={size}
           color={color}
           gradientId="airTemperatureGradient"
+          trackColor={trackColor}
         />
       );
 
@@ -728,6 +739,7 @@ function ConditionIcon({
           size={size}
           color={color}
           gradientId="seaTemperatureGradient"
+          trackColor={trackColor}
         />
       );
 
@@ -735,7 +747,7 @@ function ConditionIcon({
       return <CurrentIcon value={value} size={size} color={color} />;
 
     case "pressure":
-      return <PressureIcon value={value} size={size} color={color} />;
+      return <PressureIcon value={value} size={size} color={color} trackColor={trackColor} />;
 
     default:
       return null;
@@ -748,6 +760,47 @@ export function ConditionReadout({
   label,
   size = 68,
 }: ConditionReadoutProps) {
+  const { palette } = useTheme();
+  const styles = useThemedStyles((p) => ({
+    container: {
+      alignItems: "center",
+      flex: 1,
+      minWidth: 88,
+      maxWidth: 130,
+      paddingHorizontal: spacing.xs,
+    },
+    iconContainer: {
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: spacing.xs,
+    },
+    value: {
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 17,
+      color: p.textPrimary,
+      textAlign: "center",
+    },
+    status: {
+      marginTop: 2,
+      fontSize: 10,
+      fontFamily: fontFamily.displayMedium,
+      textTransform: "uppercase",
+      letterSpacing: 0.25,
+      textAlign: "center",
+    },
+    label: {
+      marginTop: spacing.xs,
+      minHeight: 28,
+      fontSize: 10,
+      lineHeight: 14,
+      fontFamily: fontFamily.displayMedium,
+      color: p.textSecondary,
+      textAlign: "center",
+      textTransform: "uppercase",
+      letterSpacing: 0.25,
+    },
+  }));
+
   const hasValue = typeof value === "number" && Number.isFinite(value);
 
   const presentation: ConditionPresentation = hasValue
@@ -777,6 +830,7 @@ export function ConditionReadout({
             value={value}
             size={size}
             color={presentation.color}
+            trackColor={palette.borderStrong}
           />
         )}
       </View>
@@ -799,44 +853,3 @@ export function ConditionReadout({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    alignItems: "center",
-    flex: 1,
-    minWidth: 88,
-    maxWidth: 130,
-    paddingHorizontal: spacing.xs,
-  },
-  iconContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.xs,
-  },
-  value: {
-    fontFamily: readoutFontFamily,
-    fontSize: 17,
-    fontWeight: "700",
-    color: colors.navy900,
-    textAlign: "center",
-  },
-  status: {
-    marginTop: 2,
-    fontSize: 10,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.25,
-    textAlign: "center",
-  },
-  label: {
-    marginTop: spacing.xs,
-    minHeight: 28,
-    fontSize: 10,
-    lineHeight: 14,
-    fontWeight: "700",
-    color: colors.slate600,
-    textAlign: "center",
-    textTransform: "uppercase",
-    letterSpacing: 0.25,
-  },
-});

@@ -8,14 +8,15 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 
 import { ScreenHeader } from "../components/ScreenHeader";
 import { StatusPill } from "../components/StatusPill";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { HeroPanel } from "../components/HeroPanel";
+import { EmptyState } from "../components/EmptyState";
 
-import { colors, gradients, radii, readoutFontFamily, spacing } from "../theme";
+import { colors, fontFamily, radii, shadows, spacing, useTheme, useThemedStyles } from "../theme";
 
 import { ApiError, apiRequest } from "../api/client";
 import { Trip } from "../api/types";
@@ -46,6 +47,14 @@ function tripStatusTone(
 
   return "success";
 }
+
+const DIVE_TYPE_LABELS: Record<string, string> = {
+  SNORKEL: "Snorkel",
+  SCUBA: "Scuba",
+  DEEP: "Deep dive",
+  BAITED_SHARK_SNORKEL: "Baited shark snorkel",
+  BAITED_SHARK_SCUBA: "Baited shark scuba",
+};
 
 function getCapacity(trip: Trip) {
   return trip.capacity;
@@ -79,7 +88,282 @@ function getCapacityColor(trip: Trip) {
   return colors.ocean600;
 }
 
+function useTripsStyles() {
+  return useThemedStyles((p) => ({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.deepSea900,
+    },
+    content: {
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xxxl,
+    },
+    createLaunchButton: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xl,
+      padding: spacing.md,
+      borderRadius: radii.md,
+      borderWidth: 1,
+      borderColor: colors.deepSeaBorder,
+      backgroundColor: colors.deepSea950,
+    },
+    createLaunchButtonPressed: {
+      opacity: 0.8,
+    },
+    createLaunchIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: radii.sm,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.ocean600,
+    },
+    createLaunchText: {
+      flex: 1,
+      marginLeft: spacing.md,
+    },
+    createLaunchEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.2,
+      color: colors.sky400,
+    },
+    createLaunchTitle: {
+      marginTop: 3,
+      fontSize: 15,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+    },
+    summaryTopRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+    },
+    summaryEyebrow: {
+      fontSize: 9,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.7,
+      color: colors.highlight500,
+    },
+    summaryTitle: {
+      marginTop: 4,
+      fontSize: 23,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+    },
+    liveBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 5,
+      borderRadius: radii.pill,
+      backgroundColor: "rgba(255,255,255,0.1)",
+    },
+    liveDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      marginRight: 6,
+    },
+    liveText: {
+      fontSize: 9,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: colors.white,
+    },
+    summaryStats: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      marginTop: spacing.xl,
+      paddingTop: spacing.lg,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: "rgba(255,255,255,0.2)",
+    },
+    summaryStat: {
+      flex: 1,
+      alignItems: "center",
+    },
+    summaryValue: {
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 24,
+      color: colors.white,
+    },
+    summaryLabel: {
+      marginTop: 4,
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: colors.sky400,
+    },
+    summaryRule: {
+      width: StyleSheet.hairlineWidth,
+      backgroundColor: "rgba(255,255,255,0.2)",
+    },
+    sectionHeader: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.sm,
+      marginTop: spacing.sm,
+    },
+    sectionEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.4,
+      color: colors.warning600,
+    },
+    sectionDate: {
+      marginTop: 3,
+      fontSize: 18,
+      fontFamily: fontFamily.readoutBold,
+      color: colors.mist50,
+    },
+    sectionCount: {
+      fontFamily: fontFamily.readout,
+      fontSize: 9,
+      color: colors.mist300,
+    },
+    tripCard: {
+      flexDirection: "row",
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.md,
+      borderRadius: radii.md,
+      overflow: "hidden",
+      backgroundColor: p.surface,
+      borderWidth: 1,
+      borderColor: p.border,
+      ...shadows.card,
+    },
+    tripCardPressed: {
+      opacity: 0.84,
+      transform: [{ scale: 0.99 }],
+    },
+    tripAccent: {
+      width: 6,
+      backgroundColor: colors.warning600,
+    },
+    tripCardBody: {
+      flex: 1,
+      padding: spacing.lg,
+    },
+    tripTopRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    tripTitleArea: {
+      flex: 1,
+    },
+    tripBadgeColumn: {
+      alignItems: "flex-end",
+      gap: 4,
+    },
+    tripReference: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.3,
+      color: p.textTertiary,
+    },
+    siteName: {
+      marginTop: 4,
+      fontSize: 17,
+      lineHeight: 21,
+      fontFamily: fontFamily.display,
+      color: p.textPrimary,
+    },
+    tripReadoutGrid: {
+      flexDirection: "row",
+      gap: spacing.xs,
+      marginTop: spacing.lg,
+    },
+    tripReadout: {
+      flex: 1,
+      minHeight: 48,
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+      borderRadius: radii.sm,
+      backgroundColor: p.backgroundAlt,
+    },
+    tripReadoutText: {
+      flex: 1,
+      marginLeft: 6,
+    },
+    readoutLabel: {
+      fontSize: 7,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.8,
+      color: p.textTertiary,
+    },
+    readoutValue: {
+      marginTop: 2,
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 11,
+      color: p.textPrimary,
+    },
+    manifestBlock: {
+      marginTop: spacing.lg,
+      paddingTop: spacing.md,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: p.borderStrong,
+    },
+    manifestHeaderRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    manifestLabel: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: p.textSecondary,
+    },
+    manifestValue: {
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 13,
+    },
+    capacityTrack: {
+      flexDirection: "row",
+      gap: 3,
+      marginTop: spacing.sm,
+    },
+    capacitySlot: {
+      flex: 1,
+      height: 7,
+      borderRadius: 2,
+    },
+    manifestFooterRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginTop: spacing.sm,
+    },
+    manifestMeta: {
+      fontSize: 10,
+      fontWeight: "600",
+      color: p.textSecondary,
+    },
+    openDetails: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    openDetailsText: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: colors.warning600,
+    },
+  }));
+}
+
 function CapacityTrack({ trip }: { trip: Trip }) {
+  const styles = useTripsStyles();
+  const { palette } = useTheme();
   const capacity = Math.max(1, getCapacity(trip));
   const filled = Math.min(capacity, Math.max(0, trip.confirmedCount));
 
@@ -100,7 +384,7 @@ function CapacityTrack({ trip }: { trip: Trip }) {
                 backgroundColor:
                   slotRatio <= filledRatio
                     ? getCapacityColor(trip)
-                    : colors.sand100,
+                    : palette.surfaceAlt,
               },
             ]}
           />
@@ -111,6 +395,7 @@ function CapacityTrack({ trip }: { trip: Trip }) {
 }
 
 function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
+  const styles = useTripsStyles();
   const capacity = getCapacity(trip);
   const available = getAvailability(trip);
 
@@ -135,7 +420,15 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
             </Text>
           </View>
 
-          <StatusPill label={trip.status} tone={tripStatusTone(trip.status)} />
+          <View style={styles.tripBadgeColumn}>
+            <StatusPill label={trip.status} tone={tripStatusTone(trip.status)} />
+            {trip.diveType ? (
+              <StatusPill
+                label={DIVE_TYPE_LABELS[trip.diveType] ?? trip.diveType}
+                tone={trip.diveType === "DEEP" ? "warning" : "neutral"}
+              />
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.tripReadoutGrid}>
@@ -220,6 +513,7 @@ function TripCard({ trip, onPress }: { trip: Trip; onPress: () => void }) {
 export function TripsScreen() {
   const navigation = useNavigation<any>();
   const { user } = useAuth();
+  const styles = useTripsStyles();
 
   const canCreateTrip =
     user?.roles.some((role) => CAN_CREATE_TRIP_ROLES.includes(role)) ?? false;
@@ -317,12 +611,7 @@ export function TripsScreen() {
           <>
             {error && <ErrorBanner message={error} onRetry={load} />}
 
-            <LinearGradient
-              colors={gradients.oceanHeader}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.summaryPanel}
-            >
+            <HeroPanel>
               <View style={styles.summaryTopRow}>
                 <View>
                   <Text style={styles.summaryEyebrow}>OPERATIONS BOARD</Text>
@@ -365,7 +654,7 @@ export function TripsScreen() {
                   <Text style={styles.summaryLabel}>DIVE DAYS</Text>
                 </View>
               </View>
-            </LinearGradient>
+            </HeroPanel>
 
             {canCreateTrip && (
               <Pressable
@@ -400,19 +689,11 @@ export function TripsScreen() {
           </>
         }
         ListEmptyComponent={
-          <View style={styles.emptyPanel}>
-            <Ionicons
-              name="calendar-outline"
-              size={32}
-              color={colors.ocean600}
-            />
-
-            <Text style={styles.emptyTitle}>No trips scheduled</Text>
-
-            <Text style={styles.emptyBody}>
-              New departures will appear here once added.
-            </Text>
-          </View>
+          <EmptyState
+            icon="calendar-outline"
+            title="No trips scheduled"
+            body="New departures will appear here once added."
+          />
         }
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeader}>
@@ -444,317 +725,3 @@ export function TripsScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.deepSea900,
-  },
-  content: {
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxxl,
-  },
-  createLaunchButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
-    padding: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: colors.deepSeaBorder,
-    backgroundColor: colors.deepSea950,
-  },
-  createLaunchButtonPressed: {
-    opacity: 0.8,
-  },
-  createLaunchIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: radii.sm,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.ocean600,
-  },
-  createLaunchText: {
-    flex: 1,
-    marginLeft: spacing.md,
-  },
-  createLaunchEyebrow: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-    color: colors.sky400,
-  },
-  createLaunchTitle: {
-    marginTop: 3,
-    fontSize: 15,
-    fontWeight: "800",
-    color: colors.white,
-  },
-  summaryPanel: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
-    borderRadius: radii.lg,
-    padding: spacing.xl,
-    overflow: "hidden",
-    shadowColor: colors.navy900,
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 7,
-  },
-  summaryTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-  },
-  summaryEyebrow: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.7,
-    color: colors.sky400,
-  },
-  summaryTitle: {
-    marginTop: 4,
-    fontSize: 23,
-    fontWeight: "800",
-    color: colors.white,
-  },
-  liveBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-    backgroundColor: "rgba(255,255,255,0.1)",
-  },
-  liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  liveText: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.white,
-  },
-  summaryStats: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    marginTop: spacing.xl,
-    paddingTop: spacing.lg,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.2)",
-  },
-  summaryStat: {
-    flex: 1,
-    alignItems: "center",
-  },
-  summaryValue: {
-    fontFamily: readoutFontFamily,
-    fontSize: 24,
-    fontWeight: "700",
-    color: colors.white,
-  },
-  summaryLabel: {
-    marginTop: 4,
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.sky400,
-  },
-  summaryRule: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: "rgba(255,255,255,0.2)",
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  sectionEyebrow: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.4,
-    color: colors.warning600,
-  },
-  sectionDate: {
-    marginTop: 3,
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.mist50,
-  },
-  sectionCount: {
-    fontFamily: readoutFontFamily,
-    fontSize: 9,
-    fontWeight: "700",
-    color: colors.mist300,
-  },
-  tripCard: {
-    flexDirection: "row",
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    borderRadius: radii.md,
-    overflow: "hidden",
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-    shadowColor: colors.navy900,
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  tripCardPressed: {
-    opacity: 0.84,
-    transform: [{ scale: 0.99 }],
-  },
-  tripAccent: {
-    width: 6,
-    backgroundColor: colors.warning600,
-  },
-  tripCardBody: {
-    flex: 1,
-    padding: spacing.lg,
-  },
-  tripTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
-  tripTitleArea: {
-    flex: 1,
-  },
-  tripReference: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.3,
-    color: colors.slate400,
-  },
-  siteName: {
-    marginTop: 4,
-    fontSize: 17,
-    lineHeight: 21,
-    fontWeight: "800",
-    color: colors.navy900,
-  },
-  tripReadoutGrid: {
-    flexDirection: "row",
-    gap: spacing.xs,
-    marginTop: spacing.lg,
-  },
-  tripReadout: {
-    flex: 1,
-    minHeight: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.sm,
-    backgroundColor: colors.sand50,
-  },
-  tripReadoutText: {
-    flex: 1,
-    marginLeft: 6,
-  },
-  readoutLabel: {
-    fontSize: 7,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    color: colors.slate400,
-  },
-  readoutValue: {
-    marginTop: 2,
-    fontFamily: readoutFontFamily,
-    fontSize: 11,
-    fontWeight: "700",
-    color: colors.navy900,
-  },
-  manifestBlock: {
-    marginTop: spacing.lg,
-    paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.slate200,
-  },
-  manifestHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  manifestLabel: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.slate600,
-  },
-  manifestValue: {
-    fontFamily: readoutFontFamily,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  capacityTrack: {
-    flexDirection: "row",
-    gap: 3,
-    marginTop: spacing.sm,
-  },
-  capacitySlot: {
-    flex: 1,
-    height: 7,
-    borderRadius: 2,
-  },
-  manifestFooterRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: spacing.sm,
-  },
-  manifestMeta: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: colors.slate600,
-  },
-  openDetails: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  openDetailsText: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.warning600,
-  },
-  emptyPanel: {
-    alignItems: "center",
-    marginHorizontal: spacing.lg,
-    padding: spacing.xl,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-  },
-  emptyTitle: {
-    marginTop: spacing.md,
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.navy900,
-  },
-  emptyBody: {
-    marginTop: spacing.xs,
-    fontSize: 13,
-    color: colors.slate600,
-    textAlign: "center",
-  },
-});

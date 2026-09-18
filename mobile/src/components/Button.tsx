@@ -1,6 +1,6 @@
 import React from "react";
-import { Pressable, Text, StyleSheet, ActivityIndicator, ViewStyle } from "react-native";
-import { colors, radii, spacing } from "../theme";
+import { Pressable, Text, ActivityIndicator, ViewStyle } from "react-native";
+import { fontFamily, radii, spacing, useThemedStyles, useTheme, SemanticPalette } from "../theme";
 
 interface ButtonProps {
   label: string;
@@ -11,7 +11,45 @@ interface ButtonProps {
   style?: ViewStyle;
 }
 
+function getVariantStyles(variant: ButtonProps["variant"], palette: SemanticPalette) {
+  const variantStyles: Record<string, ViewStyle> = {
+    primary: { backgroundColor: palette.accentPrimary },
+    secondary: { backgroundColor: palette.surface, borderWidth: 1.5, borderColor: palette.accentPrimary },
+    danger: { backgroundColor: palette.danger },
+    ghost: { backgroundColor: "transparent" },
+  };
+  const textVariantStyles: Record<string, { color: string }> = {
+    primary: { color: palette.textOnAccent },
+    secondary: { color: palette.accentPrimary },
+    danger: { color: palette.textOnAccent },
+    ghost: { color: palette.accentPrimary },
+  };
+  return { variantStyles, textVariantStyles };
+}
+
 export function Button({ label, onPress, variant = "primary", loading, disabled, style }: ButtonProps) {
+  const { palette } = useTheme();
+  const { variantStyles, textVariantStyles } = getVariantStyles(variant, palette);
+  const styles = useThemedStyles(() => ({
+    base: {
+      paddingVertical: 13,
+      paddingHorizontal: spacing.xl,
+      borderRadius: radii.sm,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    disabled: {
+      opacity: 0.5,
+    },
+    pressed: {
+      opacity: 0.85,
+    },
+    label: {
+      fontSize: 15,
+      fontFamily: fontFamily.displayMedium,
+    },
+  }));
+
   const isDisabled = disabled || loading;
   return (
     <Pressable
@@ -26,44 +64,10 @@ export function Button({ label, onPress, variant = "primary", loading, disabled,
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={variant === "secondary" || variant === "ghost" ? colors.ocean600 : colors.white} />
+        <ActivityIndicator color={variant === "secondary" || variant === "ghost" ? palette.accentPrimary : palette.textOnAccent} />
       ) : (
         <Text style={[styles.label, textVariantStyles[variant]]}>{label}</Text>
       )}
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  base: {
-    paddingVertical: 13,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radii.sm,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  pressed: {
-    opacity: 0.85,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-});
-
-const variantStyles: Record<string, ViewStyle> = {
-  primary: { backgroundColor: colors.ocean600 },
-  secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.ocean600 },
-  danger: { backgroundColor: colors.brick600 },
-  ghost: { backgroundColor: "transparent" },
-};
-
-const textVariantStyles: Record<string, { color: string }> = {
-  primary: { color: colors.white },
-  secondary: { color: colors.ocean600 },
-  danger: { color: colors.white },
-  ghost: { color: colors.ocean600 },
-};

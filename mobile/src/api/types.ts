@@ -21,8 +21,21 @@ export interface UserProfile {
   certAgency?: CertAgency | null;
   certLevel?: CertLevel | null;
   certNumber?: string | null;
+  certSpecialties?: string[];
   mostRecentDiveDate?: string | null;
   mostRecentDiveLocation?: string | null;
+}
+
+// Matches backend/src/routes/users.ts's updateCertSchema. Every field is
+// independently optional so a partial update (e.g. just adding one
+// specialty) only needs to send what's changing.
+export interface UpdateCertificationInput {
+  certAgency?: CertAgency | null;
+  certLevel?: CertLevel | null;
+  certNumber?: string | null;
+  certSpecialties?: string[];
+  mostRecentDiveDate?: string | null;
+  mostRecentDiveLoc?: string | null;
 }
 
 export interface Boat {
@@ -51,6 +64,15 @@ export interface LaunchSite {
 
 export type TripStatus = "SCHEDULED" | "CANCELLED" | "COMPLETED";
 
+// The five dive products the centre sells. Only DEEP ever triggers
+// requiresCertWarning below — see backend/src/lib/certification.ts.
+export type DiveType =
+  | "SNORKEL"
+  | "SCUBA"
+  | "DEEP"
+  | "BAITED_SHARK_SNORKEL"
+  | "BAITED_SHARK_SCUBA";
+
 export interface Trip {
   id: string;
   boat: Boat;
@@ -61,6 +83,11 @@ export interface Trip {
   launchTime: string;
   site?: DiveSite | null;
   siteEstimated: boolean;
+  diveType?: DiveType | null;
+  // Server-computed against the viewer's own certLevel — true only for a
+  // DEEP dive when they have no cert on file or are below Advanced Open
+  // Water. Never a hard block, just what drives the booking confirm dialog.
+  requiresCertWarning?: boolean;
   capacityOverride?: number | null;
   capacity: number;
   boatCapacity: number;
@@ -82,6 +109,7 @@ export interface CreateTripInput {
   launchSiteId?: string | null;
   siteId?: string | null;
   siteEstimated?: boolean;
+  diveType?: DiveType | null;
   tripDate: string;
   meetTime: string;
   launchTime: string;
@@ -102,10 +130,34 @@ export interface Course {
   description?: string | null;
   agency?: CertAgency | null;
   prerequisiteCertLevel?: CertLevel | null;
+  // What completing this course grants — at most one of the two is set.
+  grantsCertLevel?: CertLevel | null;
+  grantsSpecialty?: string | null;
+  active: boolean;
   price?: number | null;
   instructor?: CourseInstructor;
   enrollmentCount?: number;
   sessions: CourseSession[];
+  // Server-computed against the viewer's own cert profile.
+  alreadyQualified: boolean;
+  meetsPrerequisite: boolean;
+  // Only present for the instructor-of-record/admin/owner viewing GET /:id.
+  enrollments?: CourseEnrollmentRosterEntry[];
+}
+
+export type CourseEnrollmentStatus = "ENROLLED" | "COMPLETED" | "CANCELLED";
+
+export interface CourseEnrollmentRosterEntry {
+  id: string;
+  status: CourseEnrollmentStatus;
+  enrolledAt: string;
+  client: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    name: string;
+  };
 }
 
 export interface CourseSession {
@@ -116,6 +168,41 @@ export interface CourseSession {
   locationType: "pool" | "classroom" | "open_water";
   siteId?: string | null;
   notes?: string | null;
+}
+
+export interface CourseSessionInput {
+  sessionDate: string;
+  startTime: string;
+  endTime: string;
+  locationType: "pool" | "classroom" | "open_water";
+  siteId?: string | null;
+  notes?: string | null;
+}
+
+// Matches backend/src/routes/courses.ts's createCourseSchema.
+export interface CreateCourseInput {
+  name: string;
+  description?: string | null;
+  agency?: CertAgency | null;
+  prerequisiteCertLevel?: CertLevel | null;
+  grantsCertLevel?: CertLevel | null;
+  grantsSpecialty?: string | null;
+  price?: number | null;
+  sessions: CourseSessionInput[];
+}
+
+// Matches backend/src/routes/courses.ts's updateCourseSchema — every field
+// optional since it's a partial update, and it has no `sessions` (sessions
+// are edited individually via the reschedule endpoint).
+export interface UpdateCourseInput {
+  name?: string;
+  description?: string | null;
+  agency?: CertAgency | null;
+  prerequisiteCertLevel?: CertLevel | null;
+  grantsCertLevel?: CertLevel | null;
+  grantsSpecialty?: string | null;
+  price?: number | null;
+  active?: boolean;
 }
 
 export type EquipmentCategory =
@@ -130,6 +217,7 @@ export type EquipmentCategory =
 
 export type GasType = "AIR" | "NITROX";
 export type CylinderForm = "STANDARD" | "TALL";
+export type WeightCarryMethod = "BELT" | "POCKETS";
 export type FinStyle = "OPEN_HEEL" | "FULL_FOOT";
 
 export interface EquipmentItem {
@@ -149,6 +237,7 @@ export interface UserEquipmentProfile {
   preferredCylinderVolumeLitres: number | null;
   preferredCylinderForm: CylinderForm | null;
   preferredWeightKg: number | null;
+  preferredWeightCarryMethod: WeightCarryMethod | null;
   shoeSizeUk: number | null;
   finStyle: FinStyle | null;
 }
@@ -160,6 +249,7 @@ export interface EquipmentSelectionInput {
   cylinderVolumeLitres?: number;
   cylinderForm?: CylinderForm;
   requestedWeightKg?: number;
+  weightCarryMethod?: WeightCarryMethod;
   shoeSizeUk?: number;
   finStyle?: FinStyle;
   clientNote?: string | null;
@@ -169,6 +259,11 @@ export interface BookingEquipmentInput {
   equipmentItemId: string;
   quantity: number;
   selection: EquipmentSelectionInput;
+}
+
+export interface BookingGuestInput {
+  label?: string | null;
+  equipment: BookingEquipmentInput[];
 }
 
 export type BookingStatus = "CONFIRMED" | "CANCELLED" | "CREDITED";
@@ -182,9 +277,12 @@ export interface WaitlistEntry {
   resolvedAt: string | null;
 }
 
-export interface BookingEquipmentRequest {
+// Fields shared by BookingEquipmentRequest and BookingGuestEquipmentRequest —
+// the two are field-for-field identical apart from which owner they're keyed
+// by, so UI code that only reads the equipment fields (e.g. seeding the
+// equipment-selection form) can accept either via this shape.
+export interface EquipmentRequestFields {
   id: string;
-  bookingId: string;
   quantity: number;
   equipmentItem: Pick<EquipmentItem, "id" | "slug" | "name" | "category">;
   requestedSize: string | null;
@@ -193,11 +291,28 @@ export interface BookingEquipmentRequest {
   cylinderVolumeLitres: number | null;
   cylinderForm: CylinderForm | null;
   requestedWeightKg: number | null;
+  weightCarryMethod: WeightCarryMethod | null;
   shoeSizeUk: number | null;
   finStyle: FinStyle | null;
   clientNote: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BookingEquipmentRequest extends EquipmentRequestFields {
+  bookingId: string;
+}
+
+export interface BookingGuestEquipmentRequest extends EquipmentRequestFields {
+  bookingGuestId: string;
+}
+
+export interface BookingGuest {
+  id: string;
+  bookingId: string;
+  position: number;
+  label: string;
+  equipmentRequests: BookingGuestEquipmentRequest[];
 }
 
 export interface Booking {
@@ -207,7 +322,9 @@ export interface Booking {
   status: BookingStatus;
   bookedAt: string;
   cancelledAt: string | null;
+  partySize: number;
   equipmentRequests: BookingEquipmentRequest[];
+  guests: BookingGuest[];
 }
 
 export interface SiteConditionReading {
@@ -227,6 +344,10 @@ export interface SiteConditionReading {
   seaSurfaceTempC?: number | null;
 }
 
+export type EquipmentOwner =
+  | { type: "SELF"; label: string }
+  | { type: "GUEST"; label: string; bookingGuestId: string; position: number };
+
 export interface StaffEquipmentManifestRequest {
   id: string;
   bookingId: string;
@@ -238,6 +359,7 @@ export interface StaffEquipmentManifestRequest {
     email: string;
     phone: string | null;
   };
+  owner: EquipmentOwner;
   equipmentItem: Pick<EquipmentItem, "id" | "slug" | "name" | "category">;
   quantity: number;
   requestedSize: string | null;
@@ -246,6 +368,7 @@ export interface StaffEquipmentManifestRequest {
   cylinderVolumeLitres: number | null;
   cylinderForm: CylinderForm | null;
   requestedWeightKg: number | null;
+  weightCarryMethod: WeightCarryMethod | null;
   shoeSizeUk: number | null;
   finStyle: FinStyle | null;
   clientNote: string | null;
@@ -269,6 +392,7 @@ export interface StaffEquipmentManifest {
     cylinders: Record<string, number>;
     totalWeightKg: number;
     fins: Record<string, number>;
+    totalPartySize: number;
   };
   requests: StaffEquipmentManifestRequest[];
 }

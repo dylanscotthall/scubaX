@@ -17,12 +17,14 @@ import { ApiError, apiRequest } from "../api/client";
 import {
   Booking,
   BookingEquipmentInput,
-  BookingEquipmentRequest,
+  BookingGuestInput,
   CylinderForm,
   EquipmentCategory,
   EquipmentItem,
+  EquipmentRequestFields,
   EquipmentSelectionInput,
   FinStyle,
+  WeightCarryMethod,
   GasType,
   Trip,
   UserEquipmentProfile,
@@ -30,8 +32,9 @@ import {
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { NoticeBanner } from "../components/NoticeBanner";
 import { ScreenHeader } from "../components/ScreenHeader";
-import { colors, radii, spacing } from "../theme";
+import { colors, fontFamily, radii, spacing, useTheme, useThemedStyles } from "../theme";
 import { formatTripDateFull } from "../utils/format";
 
 const CATEGORY_ICONS: Record<
@@ -59,6 +62,7 @@ const EMPTY_PROFILE: UserEquipmentProfile = {
   preferredCylinderVolumeLitres: null,
   preferredCylinderForm: null,
   preferredWeightKg: null,
+  preferredWeightCarryMethod: null,
   shoeSizeUk: null,
   finStyle: null,
 };
@@ -85,13 +89,15 @@ function defaultOptionsFor(
         ...(gasType === "NITROX"
           ? { nitroxPercent: profile.preferredNitroxPercent ?? 32 }
           : {}),
-        cylinderVolumeLitres:
-          profile.preferredCylinderVolumeLitres ?? 12,
+        cylinderVolumeLitres: profile.preferredCylinderVolumeLitres ?? 12,
         cylinderForm: profile.preferredCylinderForm ?? "STANDARD",
       };
     }
     case "WEIGHTS":
-      return { requestedWeightKg: profile.preferredWeightKg ?? 8 };
+      return {
+        requestedWeightKg: profile.preferredWeightKg ?? 8,
+        weightCarryMethod: profile.preferredWeightCarryMethod ?? "BELT",
+      };
     case "FINS":
       return {
         shoeSizeUk: profile.shoeSizeUk ?? 9,
@@ -127,7 +133,10 @@ function selectionsFromProfile(
           profile.preferredCylinderForm != null;
         break;
       case "WEIGHTS":
-        shouldSelect = profile.preferredWeightKg != null;
+        shouldSelect =
+          profile.preferredWeightKg != null ||
+          profile.preferredWeightCarryMethod != null;
+        break;
         break;
       case "FINS":
         shouldSelect = profile.shoeSizeUk != null || profile.finStyle != null;
@@ -146,7 +155,7 @@ function selectionsFromProfile(
 }
 
 function selectionFromRequest(
-  request: BookingEquipmentRequest,
+  request: EquipmentRequestFields,
 ): EquipmentSelectionInput {
   return {
     ...(request.requestedSize == null
@@ -165,13 +174,12 @@ function selectionFromRequest(
     ...(request.requestedWeightKg == null
       ? {}
       : { requestedWeightKg: request.requestedWeightKg }),
-    ...(request.shoeSizeUk == null
+    ...(request.weightCarryMethod == null
       ? {}
-      : { shoeSizeUk: request.shoeSizeUk }),
+      : { weightCarryMethod: request.weightCarryMethod }),
+    ...(request.shoeSizeUk == null ? {} : { shoeSizeUk: request.shoeSizeUk }),
     ...(request.finStyle == null ? {} : { finStyle: request.finStyle }),
-    ...(request.clientNote == null
-      ? {}
-      : { clientNote: request.clientNote }),
+    ...(request.clientNote == null ? {} : { clientNote: request.clientNote }),
   };
 }
 
@@ -182,6 +190,31 @@ function selectionsFromBooking(booking: Booking): SelectedState {
       selectionFromRequest(request),
     ]),
   );
+}
+
+interface GuestState {
+  id: string;
+  label: string;
+  selected: SelectedState;
+}
+
+let guestKeySequence = 0;
+function nextGuestKey(): string {
+  guestKeySequence += 1;
+  return `new-guest-${guestKeySequence}`;
+}
+
+function guestsFromBooking(booking: Booking): GuestState[] {
+  return booking.guests.map((guest) => ({
+    id: guest.id,
+    label: guest.label,
+    selected: Object.fromEntries(
+      guest.equipmentRequests.map((request) => [
+        request.equipmentItem.id,
+        selectionFromRequest(request),
+      ]),
+    ),
+  }));
 }
 
 function profileFromSelections(
@@ -216,6 +249,8 @@ function profileFromSelections(
         break;
       case "WEIGHTS":
         next.preferredWeightKg = selection.requestedWeightKg ?? null;
+        next.preferredWeightCarryMethod = selection.weightCarryMethod ?? null;
+        break;
         break;
       case "FINS":
         next.shoeSizeUk = selection.shoeSizeUk ?? null;
@@ -240,16 +275,241 @@ function selectionSupportsProfile(
     case "CYLINDER":
       return Boolean(
         selection.gasType &&
-          selection.cylinderVolumeLitres &&
-          selection.cylinderForm,
+        selection.cylinderVolumeLitres &&
+        selection.cylinderForm,
       );
     case "WEIGHTS":
-      return selection.requestedWeightKg != null;
+      return (
+        selection.requestedWeightKg != null &&
+        selection.weightCarryMethod != null
+      );
     case "FINS":
       return selection.shoeSizeUk != null && selection.finStyle != null;
     default:
       return false;
   }
+}
+
+function useSelectEquipmentStyles() {
+  return useThemedStyles((p) => ({
+    fill: { flex: 1, backgroundColor: colors.deepSea900 },
+    content: { paddingTop: spacing.lg, paddingBottom: spacing.xxl },
+    loadingPanel: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    intro: {
+      fontSize: 14,
+      color: colors.mist200,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.md,
+      lineHeight: 20,
+    },
+    emptyText: {
+      fontSize: 14,
+      color: p.textSecondary,
+      lineHeight: 20,
+    },
+    itemRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: spacing.md,
+      minHeight: 52,
+    },
+    checkbox: {
+      width: 26,
+      height: 26,
+      borderRadius: 7,
+      borderWidth: 2,
+      borderColor: p.borderStrong,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: spacing.md,
+    },
+    checkboxChecked: {
+      backgroundColor: p.accentPrimary,
+      borderColor: p.accentPrimary,
+    },
+    itemIcon: { marginRight: spacing.md },
+    itemName: {
+      flex: 1,
+      fontSize: 16,
+      fontWeight: "600",
+      color: p.textPrimary,
+    },
+    divider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: p.border,
+    },
+    optionsBlock: {
+      marginLeft: 26 + spacing.md + 22 + spacing.md,
+      marginRight: spacing.md,
+      marginBottom: spacing.md,
+      padding: spacing.md,
+      borderRadius: radii.sm,
+      backgroundColor: p.backgroundAlt,
+    },
+    optionsLabel: {
+      fontSize: 11,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.4,
+      textTransform: "uppercase",
+      color: p.textSecondary,
+      marginBottom: spacing.xs,
+    },
+    optionsNote: {
+      fontSize: 12,
+      color: p.textSecondary,
+      marginTop: spacing.sm,
+      lineHeight: 16,
+    },
+    optionSpacing: { marginTop: spacing.md },
+    sizeInput: {
+      minHeight: 44,
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.sm,
+      borderWidth: 1.5,
+      borderColor: p.borderStrong,
+      backgroundColor: p.surface,
+      color: p.textPrimary,
+      fontSize: 14,
+      fontWeight: "600",
+    },
+    segmentRow: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: spacing.xs,
+    },
+    segment: {
+      paddingVertical: 10,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.sm,
+      borderWidth: 1.5,
+      borderColor: p.borderStrong,
+      backgroundColor: p.surface,
+      minWidth: 44,
+      minHeight: 40,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    segmentActive: {
+      backgroundColor: p.accentPrimary,
+      borderColor: p.accentPrimary,
+    },
+    segmentText: {
+      fontSize: 14,
+      fontFamily: fontFamily.displayMedium,
+      color: p.textPrimary,
+    },
+    segmentTextActive: { color: p.textOnAccent },
+    stepperRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    stepperLabel: {
+      fontSize: 14,
+      fontWeight: "600",
+      color: p.textPrimary,
+      flex: 1,
+    },
+    stepperControls: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+    },
+    stepperButton: {
+      width: 36,
+      height: 36,
+      borderRadius: radii.sm,
+      backgroundColor: p.surface,
+      borderWidth: 1.5,
+      borderColor: p.borderStrong,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    disabledControl: { opacity: 0.4 },
+    stepperValue: {
+      fontSize: 16,
+      fontFamily: fontFamily.readoutBold,
+      color: p.textPrimary,
+      minWidth: 52,
+      textAlign: "center",
+    },
+    sectionLabel: {
+      fontSize: 15,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.xs,
+    },
+    sectionBody: {
+      fontSize: 13,
+      lineHeight: 18,
+      color: colors.mist200,
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.md,
+    },
+    guestCard: {
+      borderWidth: 1.5,
+      borderColor: colors.sky400,
+    },
+    guestHeaderRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.sm,
+      marginBottom: spacing.sm,
+    },
+    guestLabelInput: {
+      flex: 1,
+      minHeight: 44,
+      paddingHorizontal: spacing.md,
+      borderRadius: radii.sm,
+      borderWidth: 1.5,
+      borderColor: p.borderStrong,
+      backgroundColor: p.backgroundAlt,
+      color: p.textPrimary,
+      fontSize: 15,
+      fontWeight: "700",
+    },
+    guestRemoveButton: {
+      padding: spacing.xs,
+    },
+    addGuestRow: {
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.lg,
+    },
+    profileRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: spacing.md,
+      marginHorizontal: spacing.lg,
+      padding: spacing.md,
+      borderRadius: radii.sm,
+      backgroundColor: p.surface,
+      borderWidth: 1,
+      borderColor: p.border,
+    },
+    profileTextWrap: { flex: 1 },
+    profileTitle: {
+      fontSize: 14,
+      fontWeight: "700",
+      color: p.textPrimary,
+    },
+    profileBody: {
+      fontSize: 12,
+      lineHeight: 16,
+      color: p.textSecondary,
+      marginTop: 2,
+    },
+    actionColumn: {
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.lg,
+    },
+  }));
 }
 
 function SegmentedControl<T extends string | number>({
@@ -261,6 +521,7 @@ function SegmentedControl<T extends string | number>({
   value?: T;
   onChange: (value: T) => void;
 }) {
+  const styles = useSelectEquipmentStyles();
   return (
     <View style={styles.segmentRow}>
       {options.map((option) => {
@@ -274,10 +535,7 @@ function SegmentedControl<T extends string | number>({
             accessibilityState={{ selected: active }}
           >
             <Text
-              style={[
-                styles.segmentText,
-                active && styles.segmentTextActive,
-              ]}
+              style={[styles.segmentText, active && styles.segmentTextActive]}
             >
               {option.label}
             </Text>
@@ -305,6 +563,8 @@ function Stepper({
   suffix?: string;
   onChange: (value: number) => void;
 }) {
+  const styles = useSelectEquipmentStyles();
+  const { palette } = useTheme();
   const decrease = () =>
     onChange(roundToStep(Math.max(min, value - step), step));
   const increase = () =>
@@ -320,7 +580,7 @@ function Stepper({
           style={[styles.stepperButton, value <= min && styles.disabledControl]}
           accessibilityLabel={`Decrease ${label}`}
         >
-          <Ionicons name="remove" size={20} color={colors.navy900} />
+          <Ionicons name="remove" size={20} color={palette.textPrimary} />
         </Pressable>
         <Text style={styles.stepperValue}>
           {Number.isInteger(value) ? value : value.toFixed(1)}
@@ -332,7 +592,7 @@ function Stepper({
           style={[styles.stepperButton, value >= max && styles.disabledControl]}
           accessibilityLabel={`Increase ${label}`}
         >
-          <Ionicons name="add" size={20} color={colors.navy900} />
+          <Ionicons name="add" size={20} color={palette.textPrimary} />
         </Pressable>
       </View>
     </View>
@@ -346,11 +606,17 @@ function SizeSelector({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const styles = useSelectEquipmentStyles();
+  const { palette } = useTheme();
   return (
     <>
       <SegmentedControl
         options={SIZE_OPTIONS.map((size) => ({ label: size, value: size }))}
-        value={SIZE_OPTIONS.includes(value.toUpperCase()) ? value.toUpperCase() : undefined}
+        value={
+          SIZE_OPTIONS.includes(value.toUpperCase())
+            ? value.toUpperCase()
+            : undefined
+        }
         onChange={onChange}
       />
       <TextInput
@@ -359,9 +625,216 @@ function SizeSelector({
         autoCapitalize="characters"
         maxLength={20}
         placeholder="Type another size, for example MT"
-        placeholderTextColor={colors.slate400}
+        placeholderTextColor={palette.textTertiary}
         style={styles.sizeInput}
       />
+    </>
+  );
+}
+
+function EquipmentItemList({
+  items,
+  selected,
+  onToggle,
+  onUpdateOptions,
+}: {
+  items: EquipmentItem[];
+  selected: SelectedState;
+  onToggle: (item: EquipmentItem) => void;
+  onUpdateOptions: (
+    itemId: string,
+    patch: Partial<EquipmentSelectionInput>,
+  ) => void;
+}) {
+  const styles = useSelectEquipmentStyles();
+  const { palette } = useTheme();
+
+  if (items.length === 0) {
+    return (
+      <Text style={styles.emptyText}>
+        No equipment is currently available to request.
+      </Text>
+    );
+  }
+
+  return (
+    <>
+      {items.map((item, index) => {
+        const selection = selected[item.id];
+        const isSelected = selection != null;
+        const isLast = index === items.length - 1;
+
+        return (
+          <View key={item.id}>
+            <Pressable
+              onPress={() => onToggle(item)}
+              style={styles.itemRow}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: isSelected }}
+              accessibilityLabel={item.name}
+            >
+              <View
+                style={[styles.checkbox, isSelected && styles.checkboxChecked]}
+              >
+                {isSelected ? (
+                  <Ionicons name="checkmark" size={16} color={palette.textOnAccent} />
+                ) : null}
+              </View>
+              <Ionicons
+                name={CATEGORY_ICONS[item.category]}
+                size={22}
+                color={isSelected ? colors.ocean600 : palette.textTertiary}
+                style={styles.itemIcon}
+              />
+              <Text style={styles.itemName}>{item.name}</Text>
+            </Pressable>
+
+            {isSelected &&
+            (item.category === "BCD" || item.category === "WETSUIT") ? (
+              <View style={styles.optionsBlock}>
+                <Text style={styles.optionsLabel}>Requested size</Text>
+                <SizeSelector
+                  value={selection.requestedSize ?? "M"}
+                  onChange={(requestedSize) =>
+                    onUpdateOptions(item.id, { requestedSize })
+                  }
+                />
+              </View>
+            ) : null}
+
+            {isSelected && item.category === "CYLINDER" ? (
+              <View style={styles.optionsBlock}>
+                <Text style={styles.optionsLabel}>Gas</Text>
+                <SegmentedControl<GasType>
+                  options={[
+                    { label: "Air", value: "AIR" },
+                    { label: "Nitrox", value: "NITROX" },
+                  ]}
+                  value={selection.gasType}
+                  onChange={(gasType) =>
+                    onUpdateOptions(item.id, {
+                      gasType,
+                      nitroxPercent:
+                        gasType === "NITROX"
+                          ? (selection.nitroxPercent ?? 32)
+                          : undefined,
+                    })
+                  }
+                />
+
+                {selection.gasType === "NITROX" ? (
+                  <View style={styles.optionSpacing}>
+                    <Stepper
+                      label="Nitrox percentage"
+                      value={selection.nitroxPercent ?? 32}
+                      min={22}
+                      max={40}
+                      suffix="%"
+                      onChange={(nitroxPercent) =>
+                        onUpdateOptions(item.id, { nitroxPercent })
+                      }
+                    />
+                  </View>
+                ) : null}
+
+                <Text style={[styles.optionsLabel, styles.optionSpacing]}>
+                  Cylinder volume
+                </Text>
+                <SegmentedControl<number>
+                  options={CYLINDER_VOLUME_OPTIONS.map((volume) => ({
+                    label: `${volume}L`,
+                    value: volume,
+                  }))}
+                  value={selection.cylinderVolumeLitres}
+                  onChange={(cylinderVolumeLitres) =>
+                    onUpdateOptions(item.id, { cylinderVolumeLitres })
+                  }
+                />
+
+                <Text style={[styles.optionsLabel, styles.optionSpacing]}>
+                  Cylinder form
+                </Text>
+                <SegmentedControl<CylinderForm>
+                  options={[
+                    { label: "Standard", value: "STANDARD" },
+                    { label: "Tall", value: "TALL" },
+                  ]}
+                  value={selection.cylinderForm}
+                  onChange={(cylinderForm) =>
+                    onUpdateOptions(item.id, { cylinderForm })
+                  }
+                />
+              </View>
+            ) : null}
+
+            {isSelected && item.category === "WEIGHTS" ? (
+              <View style={styles.optionsBlock}>
+                <Text style={styles.optionsLabel}>How will you carry it?</Text>
+                <SegmentedControl<WeightCarryMethod>
+                  options={[
+                    { label: "Weight belt", value: "BELT" },
+                    { label: "My own pockets", value: "POCKETS" },
+                  ]}
+                  value={selection.weightCarryMethod}
+                  onChange={(weightCarryMethod) =>
+                    onUpdateOptions(item.id, { weightCarryMethod })
+                  }
+                />
+
+                <View style={styles.optionSpacing}>
+                  <Stepper
+                    label="Total lead"
+                    value={selection.requestedWeightKg ?? 8}
+                    min={0.5}
+                    max={40}
+                    step={0.5}
+                    suffix=" kg"
+                    onChange={(requestedWeightKg) =>
+                      onUpdateOptions(item.id, { requestedWeightKg })
+                    }
+                  />
+                </View>
+
+                <Text style={styles.optionsNote}>
+                  {selection.weightCarryMethod === "POCKETS"
+                    ? "We'll hand you loose weights to load into your own pockets."
+                    : "We'll set you up with a weight belt carrying this much lead."}{" "}
+                  Staff can adjust this with you on the day.
+                </Text>
+              </View>
+            ) : null}
+
+            {isSelected && item.category === "FINS" ? (
+              <View style={styles.optionsBlock}>
+                <Stepper
+                  label="UK shoe size"
+                  value={selection.shoeSizeUk ?? 9}
+                  min={1}
+                  max={16}
+                  step={0.5}
+                  onChange={(shoeSizeUk) =>
+                    onUpdateOptions(item.id, { shoeSizeUk })
+                  }
+                />
+
+                <Text style={[styles.optionsLabel, styles.optionSpacing]}>
+                  Fin style
+                </Text>
+                <SegmentedControl<FinStyle>
+                  options={[
+                    { label: "Open heel", value: "OPEN_HEEL" },
+                    { label: "Full foot", value: "FULL_FOOT" },
+                  ]}
+                  value={selection.finStyle}
+                  onChange={(finStyle) => onUpdateOptions(item.id, { finStyle })}
+                />
+              </View>
+            ) : null}
+
+            {!isLast ? <View style={styles.divider} /> : null}
+          </View>
+        );
+      })}
     </>
   );
 }
@@ -374,12 +847,15 @@ export function SelectEquipmentScreen() {
     trip?: Trip;
   };
 
+  const styles = useSelectEquipmentStyles();
+  const { palette } = useTheme();
+
   const [trip, setTrip] = useState<Trip | null>(passedTrip ?? null);
   const [items, setItems] = useState<EquipmentItem[]>([]);
-  const [profile, setProfile] =
-    useState<UserEquipmentProfile>(EMPTY_PROFILE);
+  const [profile, setProfile] = useState<UserEquipmentProfile>(EMPTY_PROFILE);
   const [bookingId, setBookingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<SelectedState>({});
+  const [guests, setGuests] = useState<GuestState[]>([]);
   const [saveAsDefaults, setSaveAsDefaults] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -389,15 +865,19 @@ export function SelectEquipmentScreen() {
     setError(null);
     setLoading(true);
     try {
-      const [catalogueResponse, profileResponse, tripResponse, bookingResponse] =
-        await Promise.all([
-          apiRequest<{ equipmentItems: EquipmentItem[] }>("/equipment"),
-          apiRequest<{ profile: UserEquipmentProfile }>(
-            "/users/me/equipment-profile",
-          ),
-          apiRequest<{ trip: Trip }>(`/trips/${tripId}`),
-          apiRequest<{ booking: Booking | null }>(`/bookings/trip/${tripId}`),
-        ]);
+      const [
+        catalogueResponse,
+        profileResponse,
+        tripResponse,
+        bookingResponse,
+      ] = await Promise.all([
+        apiRequest<{ equipmentItems: EquipmentItem[] }>("/equipment"),
+        apiRequest<{ profile: UserEquipmentProfile }>(
+          "/users/me/equipment-profile",
+        ),
+        apiRequest<{ trip: Trip }>(`/trips/${tripId}`),
+        apiRequest<{ booking: Booking | null }>(`/bookings/trip/${tripId}`),
+      ]);
 
       const loadedProfile = profileResponse.profile ?? EMPTY_PROFILE;
       setItems(catalogueResponse.equipmentItems);
@@ -416,6 +896,9 @@ export function SelectEquipmentScreen() {
               loadedProfile,
             ),
       );
+      // Guests never seed from the profile or from the booker's own picks —
+      // a brand-new booking always starts with zero guests.
+      setGuests(activeBooking ? guestsFromBooking(activeBooking) : []);
     } catch (loadError) {
       setError(
         loadError instanceof ApiError
@@ -453,6 +936,64 @@ export function SelectEquipmentScreen() {
     }));
   }
 
+  function addGuest() {
+    setGuests((previous) => [
+      ...previous,
+      { id: nextGuestKey(), label: "", selected: {} },
+    ]);
+  }
+
+  function removeGuest(guestId: string) {
+    setGuests((previous) => previous.filter((guest) => guest.id !== guestId));
+  }
+
+  function updateGuestLabel(guestId: string, label: string) {
+    setGuests((previous) =>
+      previous.map((guest) =>
+        guest.id === guestId ? { ...guest, label } : guest,
+      ),
+    );
+  }
+
+  function toggleGuestItem(guestId: string, item: EquipmentItem) {
+    setGuests((previous) =>
+      previous.map((guest) => {
+        if (guest.id !== guestId) return guest;
+        const nextSelected = { ...guest.selected };
+        if (nextSelected[item.id]) {
+          delete nextSelected[item.id];
+        } else {
+          // Guests have no saved profile to copy from, so "blank" means the
+          // same generic fallback constants the booker sees when they have
+          // no profile yet — requestDataForItem still requires these fields
+          // to be non-null for BCD/CYLINDER/WEIGHTS/FINS categories.
+          nextSelected[item.id] = defaultOptionsFor(item.category, EMPTY_PROFILE);
+        }
+        return { ...guest, selected: nextSelected };
+      }),
+    );
+  }
+
+  function updateGuestOptions(
+    guestId: string,
+    itemId: string,
+    patch: Partial<EquipmentSelectionInput>,
+  ) {
+    setGuests((previous) =>
+      previous.map((guest) =>
+        guest.id === guestId
+          ? {
+              ...guest,
+              selected: {
+                ...guest.selected,
+                [itemId]: { ...guest.selected[itemId], ...patch },
+              },
+            }
+          : guest,
+      ),
+    );
+  }
+
   const itemById = useMemo(
     () => new Map(items.map((item) => [item.id, item])),
     [items],
@@ -481,17 +1022,28 @@ export function SelectEquipmentScreen() {
       }),
     );
 
+    const guestsPayload: BookingGuestInput[] = guests.map((guest) => ({
+      label: guest.label.trim() ? guest.label.trim() : null,
+      equipment: Object.entries(guest.selected).map(
+        ([equipmentItemId, selection]) => ({
+          equipmentItemId,
+          quantity: 1,
+          selection,
+        }),
+      ),
+    }));
+
     setSubmitting(true);
     try {
       if (bookingId) {
         await apiRequest(`/bookings/${bookingId}/equipment`, {
           method: "PUT",
-          body: { equipment },
+          body: { equipment, guests: guestsPayload },
         });
       } else {
         const response = await apiRequest<{ booking: Booking }>("/bookings", {
           method: "POST",
-          body: { tripId: trip.id, equipment },
+          body: { tripId: trip.id, equipment, guests: guestsPayload },
         });
         setBookingId(response.booking.id);
       }
@@ -562,197 +1114,64 @@ export function SelectEquipmentScreen() {
           unselected means you plan to bring your own.
         </Text>
 
-        <View style={styles.requestNotice}>
-          <Ionicons
-            name="information-circle-outline"
-            size={21}
-            color={colors.warning600}
-          />
-          <Text style={styles.requestNoticeText}>
-            Equipment selections are requests only. Staff will contact you if
-            anything is unavailable.
-          </Text>
-        </View>
+        <NoticeBanner
+          icon="information-circle-outline"
+          body="Equipment selections are requests only. Staff will contact you if anything is unavailable."
+        />
 
         <Card>
-          {items.length === 0 ? (
-            <Text style={styles.emptyText}>
-              No equipment is currently available to request.
-            </Text>
-          ) : (
-            items.map((item, index) => {
-              const selection = selected[item.id];
-              const isSelected = selection != null;
-              const isLast = index === items.length - 1;
-
-              return (
-                <View key={item.id}>
-                  <Pressable
-                    onPress={() => toggleItem(item)}
-                    style={styles.itemRow}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: isSelected }}
-                    accessibilityLabel={item.name}
-                  >
-                    <View
-                      style={[
-                        styles.checkbox,
-                        isSelected && styles.checkboxChecked,
-                      ]}
-                    >
-                      {isSelected ? (
-                        <Ionicons
-                          name="checkmark"
-                          size={16}
-                          color={colors.white}
-                        />
-                      ) : null}
-                    </View>
-                    <Ionicons
-                      name={CATEGORY_ICONS[item.category]}
-                      size={22}
-                      color={
-                        isSelected ? colors.ocean600 : colors.slate400
-                      }
-                      style={styles.itemIcon}
-                    />
-                    <Text style={styles.itemName}>{item.name}</Text>
-                  </Pressable>
-
-                  {isSelected &&
-                  (item.category === "BCD" ||
-                    item.category === "WETSUIT") ? (
-                    <View style={styles.optionsBlock}>
-                      <Text style={styles.optionsLabel}>Requested size</Text>
-                      <SizeSelector
-                        value={selection.requestedSize ?? "M"}
-                        onChange={(requestedSize) =>
-                          updateOptions(item.id, { requestedSize })
-                        }
-                      />
-                    </View>
-                  ) : null}
-
-                  {isSelected && item.category === "CYLINDER" ? (
-                    <View style={styles.optionsBlock}>
-                      <Text style={styles.optionsLabel}>Gas</Text>
-                      <SegmentedControl<GasType>
-                        options={[
-                          { label: "Air", value: "AIR" },
-                          { label: "Nitrox", value: "NITROX" },
-                        ]}
-                        value={selection.gasType}
-                        onChange={(gasType) =>
-                          updateOptions(item.id, {
-                            gasType,
-                            nitroxPercent:
-                              gasType === "NITROX"
-                                ? (selection.nitroxPercent ?? 32)
-                                : undefined,
-                          })
-                        }
-                      />
-
-                      {selection.gasType === "NITROX" ? (
-                        <View style={styles.optionSpacing}>
-                          <Stepper
-                            label="Nitrox percentage"
-                            value={selection.nitroxPercent ?? 32}
-                            min={22}
-                            max={40}
-                            suffix="%"
-                            onChange={(nitroxPercent) =>
-                              updateOptions(item.id, { nitroxPercent })
-                            }
-                          />
-                        </View>
-                      ) : null}
-
-                      <Text style={[styles.optionsLabel, styles.optionSpacing]}>
-                        Cylinder volume
-                      </Text>
-                      <SegmentedControl<number>
-                        options={CYLINDER_VOLUME_OPTIONS.map((volume) => ({
-                          label: `${volume}L`,
-                          value: volume,
-                        }))}
-                        value={selection.cylinderVolumeLitres}
-                        onChange={(cylinderVolumeLitres) =>
-                          updateOptions(item.id, { cylinderVolumeLitres })
-                        }
-                      />
-
-                      <Text style={[styles.optionsLabel, styles.optionSpacing]}>
-                        Cylinder form
-                      </Text>
-                      <SegmentedControl<CylinderForm>
-                        options={[
-                          { label: "Standard", value: "STANDARD" },
-                          { label: "Tall", value: "TALL" },
-                        ]}
-                        value={selection.cylinderForm}
-                        onChange={(cylinderForm) =>
-                          updateOptions(item.id, { cylinderForm })
-                        }
-                      />
-                    </View>
-                  ) : null}
-
-                  {isSelected && item.category === "WEIGHTS" ? (
-                    <View style={styles.optionsBlock}>
-                      <Stepper
-                        label="Total lead"
-                        value={selection.requestedWeightKg ?? 8}
-                        min={0.5}
-                        max={40}
-                        step={0.5}
-                        suffix=" kg"
-                        onChange={(requestedWeightKg) =>
-                          updateOptions(item.id, { requestedWeightKg })
-                        }
-                      />
-                      <Text style={styles.optionsNote}>
-                        Enter the total kilograms you normally use. Staff can
-                        adjust this with you on the day.
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {isSelected && item.category === "FINS" ? (
-                    <View style={styles.optionsBlock}>
-                      <Stepper
-                        label="UK shoe size"
-                        value={selection.shoeSizeUk ?? 9}
-                        min={1}
-                        max={16}
-                        step={0.5}
-                        onChange={(shoeSizeUk) =>
-                          updateOptions(item.id, { shoeSizeUk })
-                        }
-                      />
-
-                      <Text style={[styles.optionsLabel, styles.optionSpacing]}>
-                        Fin style
-                      </Text>
-                      <SegmentedControl<FinStyle>
-                        options={[
-                          { label: "Open heel", value: "OPEN_HEEL" },
-                          { label: "Full foot", value: "FULL_FOOT" },
-                        ]}
-                        value={selection.finStyle}
-                        onChange={(finStyle) =>
-                          updateOptions(item.id, { finStyle })
-                        }
-                      />
-                    </View>
-                  ) : null}
-
-                  {!isLast ? <View style={styles.divider} /> : null}
-                </View>
-              );
-            })
-          )}
+          <EquipmentItemList
+            items={items}
+            selected={selected}
+            onToggle={toggleItem}
+            onUpdateOptions={updateOptions}
+          />
         </Card>
+
+        <Text style={styles.sectionLabel}>Bringing anyone with you?</Text>
+        <Text style={styles.sectionBody}>
+          Add each guest travelling with you and pick equipment for them too.
+          Guests don't have an app account, so their selections always start
+          blank.
+        </Text>
+
+        {guests.map((guest, index) => (
+          <Card key={guest.id} style={styles.guestCard}>
+            <View style={styles.guestHeaderRow}>
+              <TextInput
+                value={guest.label}
+                onChangeText={(label) => updateGuestLabel(guest.id, label)}
+                placeholder={`Guest ${index + 1}`}
+                placeholderTextColor={palette.textTertiary}
+                style={styles.guestLabelInput}
+                maxLength={40}
+              />
+              <Pressable
+                onPress={() => removeGuest(guest.id)}
+                accessibilityLabel={`Remove ${guest.label || `Guest ${index + 1}`}`}
+                style={styles.guestRemoveButton}
+              >
+                <Ionicons
+                  name="close-circle-outline"
+                  size={22}
+                  color={palette.textTertiary}
+                />
+              </Pressable>
+            </View>
+            <EquipmentItemList
+              items={items}
+              selected={guest.selected}
+              onToggle={(item) => toggleGuestItem(guest.id, item)}
+              onUpdateOptions={(itemId, patch) =>
+                updateGuestOptions(guest.id, itemId, patch)
+              }
+            />
+          </Card>
+        ))}
+
+        <View style={styles.addGuestRow}>
+          <Button label="Add a guest" variant="secondary" onPress={addGuest} />
+        </View>
 
         <View style={styles.profileRow}>
           <View style={styles.profileTextWrap}>
@@ -768,10 +1187,10 @@ export function SelectEquipmentScreen() {
             onValueChange={setSaveAsDefaults}
             disabled={!canSaveProfile}
             trackColor={{
-              false: colors.slate200,
+              false: palette.borderStrong,
               true: colors.sky400,
             }}
-            thumbColor={saveAsDefaults ? colors.ocean600 : colors.white}
+            thumbColor={saveAsDefaults ? colors.ocean600 : palette.surface}
           />
         </View>
 
@@ -784,11 +1203,13 @@ export function SelectEquipmentScreen() {
                       selectedCount === 1 ? "" : "s"
                     }`
                   : "Remove all equipment requests"
-                : selectedCount > 0
-                  ? `Confirm booking · ${selectedCount} request${
-                      selectedCount === 1 ? "" : "s"
-                    }`
-                  : "Confirm booking without rental gear"
+                : guests.length > 0
+                  ? `Confirm booking · ${1 + guests.length} people`
+                  : selectedCount > 0
+                    ? `Confirm booking · ${selectedCount} request${
+                        selectedCount === 1 ? "" : "s"
+                      }`
+                    : "Confirm booking without rental gear"
             }
             onPress={confirmBooking}
             loading={submitting}
@@ -799,198 +1220,3 @@ export function SelectEquipmentScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  fill: { flex: 1, backgroundColor: colors.deepSea900 },
-  content: { paddingTop: spacing.lg, paddingBottom: spacing.xxl },
-  loadingPanel: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  intro: {
-    fontSize: 14,
-    color: colors.mist200,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    lineHeight: 20,
-  },
-  requestNotice: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    alignItems: "flex-start",
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    padding: spacing.md,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: colors.warning600,
-    backgroundColor: colors.warningBg,
-  },
-  requestNoticeText: {
-    flex: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    color: colors.navy900,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: colors.slate600,
-    lineHeight: 20,
-  },
-  itemRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: spacing.md,
-    minHeight: 52,
-  },
-  checkbox: {
-    width: 26,
-    height: 26,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: colors.slate200,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: spacing.md,
-  },
-  checkboxChecked: {
-    backgroundColor: colors.ocean600,
-    borderColor: colors.ocean600,
-  },
-  itemIcon: { marginRight: spacing.md },
-  itemName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "600",
-    color: colors.navy900,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.sand100,
-  },
-  optionsBlock: {
-    marginLeft: 26 + spacing.md + 22 + spacing.md,
-    marginRight: spacing.md,
-    marginBottom: spacing.md,
-    padding: spacing.md,
-    borderRadius: radii.sm,
-    backgroundColor: colors.sand50,
-  },
-  optionsLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-    textTransform: "uppercase",
-    color: colors.slate600,
-    marginBottom: spacing.xs,
-  },
-  optionsNote: {
-    fontSize: 12,
-    color: colors.slate600,
-    marginTop: spacing.sm,
-    lineHeight: 16,
-  },
-  optionSpacing: { marginTop: spacing.md },
-  sizeInput: {
-    minHeight: 44,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.sm,
-    borderWidth: 1.5,
-    borderColor: colors.slate200,
-    backgroundColor: colors.white,
-    color: colors.navy900,
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  segmentRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  segment: {
-    paddingVertical: 10,
-    paddingHorizontal: spacing.md,
-    borderRadius: radii.sm,
-    borderWidth: 1.5,
-    borderColor: colors.slate200,
-    backgroundColor: colors.white,
-    minWidth: 44,
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  segmentActive: {
-    backgroundColor: colors.ocean600,
-    borderColor: colors.ocean600,
-  },
-  segmentText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.navy900,
-  },
-  segmentTextActive: { color: colors.white },
-  stepperRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
-  stepperLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: colors.navy900,
-    flex: 1,
-  },
-  stepperControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  stepperButton: {
-    width: 36,
-    height: 36,
-    borderRadius: radii.sm,
-    backgroundColor: colors.white,
-    borderWidth: 1.5,
-    borderColor: colors.slate200,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  disabledControl: { opacity: 0.4 },
-  stepperValue: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: colors.navy900,
-    minWidth: 52,
-    textAlign: "center",
-  },
-  profileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    marginHorizontal: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radii.sm,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-  },
-  profileTextWrap: { flex: 1 },
-  profileTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.navy900,
-  },
-  profileBody: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: colors.slate600,
-    marginTop: 2,
-  },
-  actionColumn: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-  },
-});

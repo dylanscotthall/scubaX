@@ -5,7 +5,7 @@
     "version": "0.3.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -29,7 +29,19 @@
     "plugins": [
       "expo-font",
       "expo-secure-store",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/sx_logo_transparent.png",
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "backgroundColor": "#F6F4EF",
+          "dark": {
+            "backgroundColor": "#06182A"
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -13,26 +13,7 @@ Use this file first. It is the only installation path for this package.
 
 Do not install the Arch `postgresql` package for this project. PostgreSQL runs in Docker. The container uses host port `5433`, deliberately avoiding the standard `5432` port that may already be used on your machine.
 
-## 1. Back up the old project
-
-From the directory that contains the old project:
-
-```bash
-mv scubaX scubaX-old-broken-backup
-```
-
-Use another backup name when that name already exists. Do not copy files from the old project into this one.
-
-## 2. Extract this package
-
-```bash
-unzip ScubaXcursions-Arch-v0.3.1-FINAL.zip
-cd ScubaXcursions-Arch-v0.3.1
-```
-
-Do not copy old `node_modules`, `.env`, generated Prisma files, `dist`, `.expo`, or migrations into this directory.
-
-## 3. Install the Arch dependencies
+## 1. Install the Arch dependencies
 
 ```bash
 sudo pacman -Syu
@@ -61,7 +42,7 @@ pacman -Q podman-docker 2>/dev/null && sudo pacman -Rns podman-docker
 sudo pacman -S --needed docker docker-compose
 ```
 
-## 4. Enable Docker for your account
+## 2. Enable Docker for your account
 
 ```bash
 sudo systemctl enable --now docker.service
@@ -81,9 +62,9 @@ npm --version
 
 Node must be within the Node 24 release line; `.nvmrc` pins 24.19.0. Do not run project commands with `sudo`.
 
-## 5. Run the complete setup
+## 3. Run the complete setup
 
-From the extracted repository root:
+From the repository root:
 
 ```bash
 chmod +x scripts/*.sh
@@ -108,7 +89,7 @@ This one command:
 
 Do not continue when this command reports an error. Fix the first error shown and rerun the same command.
 
-## 6. Start the backend each day
+## 4. Start the backend each day
 
 Terminal 1, from the repository root:
 
@@ -136,7 +117,7 @@ Admin:  admin@scubaxcursion.local / LocalAdmin123!
 Client: client@scubaxcursion.local / LocalClient123!
 ```
 
-## 7. Verify phone-to-laptop networking
+## 5. Verify phone-to-laptop networking
 
 Keep the backend running. Check the generated URL:
 
@@ -167,7 +148,7 @@ ip -4 route get 1.1.1.1
 
 The laptop and phone must be on the same Wi-Fi. A VPN, firewall, guest Wi-Fi, or router client isolation can block local access.
 
-## 8. Install the phone development build
+## 6. Install the phone development build
 
 From the repository root:
 
@@ -192,7 +173,7 @@ npx eas-cli@latest build --platform ios --profile development
 
 Install the generated development build on the phone. EAS performs native builds in the cloud, so Arch can build for Android and iOS. Local iOS compilation still requires macOS and Xcode.
 
-## 9. Start the mobile application each day
+## 7. Start the mobile application each day
 
 Terminal 3, from the repository root:
 
@@ -211,7 +192,7 @@ npm run start:dev:tunnel
 
 A Metro tunnel does not expose the local backend. The phone must still reach the URL in `mobile/.env`; Railway staging is the clean fallback for restrictive networks.
 
-## 10. Deploy Railway only after local setup passes
+## 8. Deploy Railway only after local setup passes
 
 Follow:
 

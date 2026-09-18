@@ -10,12 +10,15 @@ import {
 import { prisma } from "../lib/prisma";
 import { asyncRoute, HttpError } from "../lib/http";
 import {
+  bookingGuestListSchema,
   equipmentRequestListSchema,
   prepareEquipmentRequestRows,
+  prepareGuestEquipmentRequestRows,
+  serializeBookingGuest,
   serializeEquipmentRequest,
 } from "../lib/equipment";
 import { serializableTransaction } from "../lib/transactions";
-import { clientBookingCapacity } from "../lib/capacity";
+import { clientBookingCapacity, confirmedOccupiedSeats } from "../lib/capacity";
 import { requireAuth } from "../middleware/auth";
 import { notifyWaitlistSpotOpen } from "../lib/notify";
 
@@ -25,12 +28,14 @@ const createBookingSchema = z
   .object({
     tripId: z.string().guid(),
     equipment: equipmentRequestListSchema,
+    guests: bookingGuestListSchema,
   })
   .strict();
 
 const replaceEquipmentSchema = z
   .object({
     equipment: equipmentRequestListSchema,
+    guests: bookingGuestListSchema,
   })
   .strict();
 
@@ -43,6 +48,19 @@ const bookingRequestInclude = {
     },
     orderBy: { createdAt: "asc" as const },
   },
+  guests: {
+    include: {
+      equipmentRequests: {
+        include: {
+          equipmentItem: {
+            select: { id: true, slug: true, name: true, category: true },
+          },
+        },
+        orderBy: { createdAt: "asc" as const },
+      },
+    },
+    orderBy: { position: "asc" as const },
+  },
 } as const;
 
 function serializeBooking(booking: {
@@ -52,7 +70,9 @@ function serializeBooking(booking: {
   status: BookingStatus;
   bookedAt: Date;
   cancelledAt: Date | null;
+  partySize: number;
   equipmentRequests: Parameters<typeof serializeEquipmentRequest>[0][];
+  guests: Parameters<typeof serializeBookingGuest>[0][];
 }) {
   return {
     id: booking.id,
@@ -61,8 +81,43 @@ function serializeBooking(booking: {
     status: booking.status,
     bookedAt: booking.bookedAt,
     cancelledAt: booking.cancelledAt,
+    partySize: booking.partySize,
     equipmentRequests: booking.equipmentRequests.map(serializeEquipmentRequest),
+    guests: booking.guests.map(serializeBookingGuest),
   };
+}
+
+async function replaceBookingGuests(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  bookingId: string,
+  guests: z.infer<typeof bookingGuestListSchema>,
+): Promise<void> {
+  // Cascade delete removes each guest's equipment requests automatically.
+  await tx.bookingGuest.deleteMany({ where: { bookingId } });
+
+  for (let index = 0; index < guests.length; index += 1) {
+    const guestInput = guests[index];
+    const guestRow = await tx.bookingGuest.create({
+      data: {
+        bookingId,
+        position: index + 1,
+        label: guestInput.label ?? null,
+      },
+    });
+
+    const guestEquipmentRows = await prepareGuestEquipmentRequestRows(
+      tx,
+      organizationId,
+      guestRow.id,
+      guestInput.equipment,
+    );
+    if (guestEquipmentRows.length > 0) {
+      await tx.bookingGuestEquipmentRequest.createMany({
+        data: guestEquipmentRows,
+      });
+    }
+  }
 }
 
 const bookingStaffRoles = new Set<AppRole>([
@@ -148,9 +203,10 @@ router.post(
       return res.status(400).json({ error: parsed.error.flatten() });
     }
 
-    const { tripId, equipment } = parsed.data;
+    const { tripId, equipment, guests } = parsed.data;
     const userId = req.auth!.userId;
     const organizationId = req.auth!.organizationId;
+    const partySize = 1 + guests.length;
 
     try {
       const booking = await serializableTransaction(async (tx) => {
@@ -158,11 +214,6 @@ router.post(
           where: { id: tripId, organizationId },
           include: {
             boat: { select: { capacity: true } },
-            _count: {
-              select: {
-                bookings: { where: { status: BookingStatus.CONFIRMED } },
-              },
-            },
           },
         });
 
@@ -182,10 +233,13 @@ router.post(
         const capacity = clientBookingCapacity(
           trip.capacityOverride ?? trip.boat.capacity,
         );
-        if (trip._count.bookings >= capacity) {
+        const occupiedSeats = await confirmedOccupiedSeats(tx, tripId);
+        if (occupiedSeats + partySize > capacity) {
           throw new HttpError(
             409,
-            "This trip is full. Join the waitlist instead.",
+            guests.length > 0
+              ? "This trip does not have enough open spots for your full group. Join the waitlist instead."
+              : "This trip is full. Join the waitlist instead.",
           );
         }
 
@@ -196,6 +250,7 @@ router.post(
                 status: BookingStatus.CONFIRMED,
                 cancelledAt: null,
                 bookedAt: new Date(),
+                partySize,
               },
             })
           : await tx.booking.create({
@@ -203,6 +258,7 @@ router.post(
                 tripId,
                 userId,
                 status: BookingStatus.CONFIRMED,
+                partySize,
               },
             });
 
@@ -222,6 +278,8 @@ router.post(
           await tx.bookingEquipmentRequest.createMany({ data: requestRows });
         }
 
+        await replaceBookingGuests(tx, organizationId, created.id, guests);
+
         await tx.tripWaitlistEntry.updateMany({
           where: {
             tripId,
@@ -234,7 +292,7 @@ router.post(
         // Only close competing notifications when this booking takes the last
         // available client place. If more places remain, other notified users
         // must still be able to claim them.
-        if (trip._count.bookings + 1 >= capacity) {
+        if (occupiedSeats + partySize >= capacity) {
           await tx.tripWaitlistEntry.updateMany({
             where: {
               tripId,
@@ -278,9 +336,10 @@ router.put(
     const organizationId = req.auth!.organizationId;
     const userId = req.auth!.userId;
     const allowAnyUser = isBookingStaff(req.auth!.roles);
+    const newPartySize = 1 + parsed.data.guests.length;
 
     try {
-      const booking = await prisma.$transaction(async (tx) => {
+      const booking = await serializableTransaction(async (tx) => {
         const existing = await tx.booking.findFirst({
           where: {
             id: req.params.bookingId,
@@ -288,12 +347,44 @@ router.put(
             trip: { organizationId },
             ...(allowAnyUser ? {} : { userId }),
           },
-          select: { id: true },
+          select: {
+            id: true,
+            tripId: true,
+            partySize: true,
+            trip: {
+              select: {
+                capacityOverride: true,
+                boat: { select: { capacity: true } },
+              },
+            },
+          },
         });
 
         if (!existing) {
           throw new HttpError(404, "Active booking not found");
         }
+
+        if (newPartySize > existing.partySize) {
+          const capacity = clientBookingCapacity(
+            existing.trip.capacityOverride ?? existing.trip.boat.capacity,
+          );
+          const occupiedSeats = await confirmedOccupiedSeats(
+            tx,
+            existing.tripId,
+          );
+          const occupiedByOthers = occupiedSeats - existing.partySize;
+          if (occupiedByOthers + newPartySize > capacity) {
+            throw new HttpError(
+              409,
+              "Not enough remaining spots on this trip for your updated group size",
+            );
+          }
+        }
+
+        await tx.booking.update({
+          where: { id: existing.id },
+          data: { partySize: newPartySize },
+        });
 
         const requestRows = await prepareEquipmentRequestRows(
           tx,
@@ -308,6 +399,13 @@ router.put(
         if (requestRows.length > 0) {
           await tx.bookingEquipmentRequest.createMany({ data: requestRows });
         }
+
+        await replaceBookingGuests(
+          tx,
+          organizationId,
+          existing.id,
+          parsed.data.guests,
+        );
 
         return tx.booking.findUniqueOrThrow({
           where: { id: existing.id },
@@ -372,11 +470,6 @@ router.post(
       },
       include: {
         boat: { select: { capacity: true } },
-        _count: {
-          select: {
-            bookings: { where: { status: BookingStatus.CONFIRMED } },
-          },
-        },
       },
     });
     if (!trip) {
@@ -396,7 +489,8 @@ router.post(
     const capacity = clientBookingCapacity(
       trip.capacityOverride ?? trip.boat.capacity,
     );
-    if (trip._count.bookings < capacity) {
+    const occupiedSeats = await confirmedOccupiedSeats(prisma, tripId);
+    if (occupiedSeats < capacity) {
       return res
         .status(409)
         .json({ error: "This trip still has an open spot; book it directly" });
@@ -435,11 +529,6 @@ router.post(
           },
           include: {
             boat: { select: { capacity: true } },
-            _count: {
-              select: {
-                bookings: { where: { status: BookingStatus.CONFIRMED } },
-              },
-            },
           },
         });
         if (!trip) throw new HttpError(404, "Scheduled trip not found");
@@ -455,7 +544,8 @@ router.post(
         const capacity = clientBookingCapacity(
           trip.capacityOverride ?? trip.boat.capacity,
         );
-        if (trip._count.bookings >= capacity) {
+        const occupiedSeats = await confirmedOccupiedSeats(tx, tripId);
+        if (occupiedSeats >= capacity) {
           throw new HttpError(
             409,
             "Too late — someone else already claimed this spot",
@@ -482,22 +572,29 @@ router.post(
                 status: BookingStatus.CONFIRMED,
                 cancelledAt: null,
                 bookedAt: new Date(),
+                partySize: 1,
               },
             })
           : await tx.booking.create({
-              data: { tripId, userId, status: BookingStatus.CONFIRMED },
+              data: {
+                tripId,
+                userId,
+                status: BookingStatus.CONFIRMED,
+                partySize: 1,
+              },
             });
 
         await tx.bookingEquipmentRequest.deleteMany({
           where: { bookingId: created.id },
         });
+        await tx.bookingGuest.deleteMany({ where: { bookingId: created.id } });
 
         await tx.tripWaitlistEntry.update({
           where: { id: waitlistEntry.id },
           data: { status: WaitlistStatus.CLAIMED, resolvedAt: new Date() },
         });
 
-        if (trip._count.bookings + 1 >= capacity) {
+        if (occupiedSeats + 1 >= capacity) {
           await tx.tripWaitlistEntry.updateMany({
             where: {
               tripId,

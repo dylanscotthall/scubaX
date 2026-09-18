@@ -2,7 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, Image } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { colors, gradients, spacing } from "../theme";
+import { colors, fontFamily, gradients, spacing } from "../theme";
 
 interface ScreenHeaderProps {
   title: string;
@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
   title: {
     color: colors.white,
     fontSize: 22,
-    fontWeight: "800",
+    fontFamily: fontFamily.display,
     letterSpacing: 0.3,
   },
   subtitle: {

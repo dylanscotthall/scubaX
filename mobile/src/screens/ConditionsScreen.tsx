@@ -1,23 +1,258 @@
 import React, { useCallback, useEffect, useState } from "react";
-import {
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 
 import { ScreenHeader } from "../components/ScreenHeader";
 import { ConditionReadout } from "../components/ConditionReadout";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { HeroPanel } from "../components/HeroPanel";
+import { EmptyState } from "../components/EmptyState";
+import { NoticeBanner } from "../components/NoticeBanner";
 
-import { colors, gradients, radii, readoutFontFamily, spacing } from "../theme";
+import { colors, fontFamily, radii, shadows, spacing, useThemedStyles } from "../theme";
 
 import { ApiError, apiRequest } from "../api/client";
 import { SiteConditionReading } from "../api/types";
 import { degreesToCompass } from "../utils/format";
+
+function useConditionsStyles() {
+  return useThemedStyles((p) => ({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.deepSea900,
+    },
+    content: {
+      paddingTop: spacing.lg,
+      paddingBottom: spacing.xxxl,
+    },
+    heroTopRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      gap: spacing.md,
+    },
+    heroEyebrow: {
+      fontSize: 9,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.7,
+      color: colors.highlight500,
+    },
+    heroTitle: {
+      marginTop: 4,
+      maxWidth: 260,
+      fontSize: 23,
+      lineHeight: 28,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+    },
+    stationBadge: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 5,
+      borderRadius: radii.pill,
+      backgroundColor: "rgba(255,255,255,0.1)",
+    },
+    stationDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 4,
+      marginRight: 6,
+      backgroundColor: colors.warning600,
+    },
+    stationBadgeText: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 0.8,
+      color: colors.white,
+    },
+    heroDescription: {
+      marginTop: spacing.md,
+      maxWidth: 320,
+      fontSize: 13,
+      lineHeight: 19,
+      color: colors.sand100,
+    },
+    locationStrip: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: spacing.xl,
+      paddingTop: spacing.md,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: "rgba(255,255,255,0.2)",
+    },
+    locationItem: {
+      flex: 1,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    locationText: {
+      marginLeft: spacing.xs,
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 9,
+      letterSpacing: 0.8,
+      color: colors.white,
+    },
+    locationDivider: {
+      width: StyleSheet.hairlineWidth,
+      height: 18,
+      marginHorizontal: spacing.md,
+      backgroundColor: "rgba(255,255,255,0.2)",
+    },
+    instrumentPanel: {
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.md,
+      padding: spacing.lg,
+      borderRadius: radii.lg,
+      backgroundColor: p.surface,
+      borderWidth: 1,
+      borderColor: p.border,
+      ...shadows.card,
+    },
+    panelHeading: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    panelHeadingIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: spacing.sm,
+      backgroundColor: p.warningBg,
+    },
+    panelEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.3,
+      color: colors.warning600,
+    },
+    panelTitle: {
+      marginTop: 2,
+      fontSize: 18,
+      fontFamily: fontFamily.display,
+      color: p.textPrimary,
+    },
+    conditionGrid: {
+      flexDirection: "row",
+      alignItems: "stretch",
+      marginTop: spacing.lg,
+    },
+    verticalRule: {
+      width: StyleSheet.hairlineWidth,
+      marginVertical: spacing.sm,
+      backgroundColor: p.borderStrong,
+    },
+    panelFooterNote: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: spacing.md,
+      paddingTop: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: p.borderStrong,
+    },
+    panelFooterText: {
+      flex: 1,
+      marginLeft: spacing.xs,
+      fontSize: 10,
+      lineHeight: 14,
+      color: p.textTertiary,
+    },
+    directionReadout: {
+      flexDirection: "row",
+      alignItems: "center",
+      marginTop: spacing.lg,
+      padding: spacing.md,
+      borderRadius: radii.sm,
+      backgroundColor: p.backgroundAlt,
+    },
+    directionIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: p.surface,
+      borderWidth: 1,
+      borderColor: p.border,
+    },
+    directionText: {
+      flex: 1,
+      marginLeft: spacing.sm,
+    },
+    directionLabel: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: p.textTertiary,
+    },
+    directionValue: {
+      marginTop: 3,
+      fontFamily: fontFamily.readoutBold,
+      fontSize: 13,
+      color: p.textPrimary,
+    },
+    compassNeedle: {
+      width: 36,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sourcePanel: {
+      marginHorizontal: spacing.lg,
+      marginTop: spacing.md,
+      padding: spacing.lg,
+      borderRadius: radii.md,
+      backgroundColor: colors.navy900,
+    },
+    sourceTopRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+      marginBottom: spacing.md,
+    },
+    sourceEyebrow: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1.3,
+      color: colors.sky400,
+    },
+    sourceTitle: {
+      marginTop: 3,
+      fontSize: 17,
+      fontFamily: fontFamily.display,
+      color: colors.white,
+    },
+    sourceRow: {
+      flexDirection: "row",
+      justifyContent: "space-between",
+      paddingVertical: spacing.sm,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: "rgba(255,255,255,0.15)",
+    },
+    sourceLabel: {
+      fontSize: 8,
+      fontFamily: fontFamily.displayMedium,
+      letterSpacing: 1,
+      color: colors.sky400,
+    },
+    sourceValue: {
+      flex: 1,
+      marginLeft: spacing.md,
+      fontFamily: fontFamily.readout,
+      fontSize: 10,
+      textAlign: "right",
+      color: colors.white,
+    },
+    disclaimer: {
+      marginTop: spacing.md,
+      fontSize: 10,
+      lineHeight: 15,
+      color: colors.slate200,
+    },
+  }));
+}
 
 function DirectionReadout({
   icon,
@@ -28,6 +263,7 @@ function DirectionReadout({
   label: string;
   degrees: number | null | undefined;
 }) {
+  const styles = useConditionsStyles();
   const hasValue = typeof degrees === "number" && Number.isFinite(degrees);
 
   return (
@@ -74,6 +310,7 @@ function PanelHeading({
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
 }) {
+  const styles = useConditionsStyles();
   return (
     <View style={styles.panelHeading}>
       <View style={styles.panelHeadingIcon}>
@@ -90,6 +327,7 @@ function PanelHeading({
 }
 
 export function ConditionsScreen() {
+  const styles = useConditionsStyles();
   const [reading, setReading] = useState<SiteConditionReading | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -142,12 +380,7 @@ export function ConditionsScreen() {
       >
         {error && <ErrorBanner message={error} onRetry={load} />}
 
-        <LinearGradient
-          colors={gradients.oceanHeader}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.heroPanel}
-        >
+        <HeroPanel>
           <View style={styles.heroTopRow}>
             <View>
               <Text style={styles.heroEyebrow}>MARINE OBSERVATION</Text>
@@ -189,41 +422,20 @@ export function ConditionsScreen() {
               <Text style={styles.locationText}>ALIWAL SHOAL</Text>
             </View>
           </View>
-        </LinearGradient>
+        </HeroPanel>
 
-        <View style={styles.noticePanel}>
-          <View style={styles.noticeIcon}>
-            <Ionicons
-              name="radio-outline"
-              size={19}
-              color={colors.warning600}
-            />
-          </View>
-
-          <View style={styles.noticeText}>
-            <Text style={styles.noticeTitle}>Latest recorded feed</Text>
-
-            <Text style={styles.noticeBody}>
-              Readings come from the latest condition record in the backend.
-              Staff can replace this source with a live feed later.
-            </Text>
-          </View>
-        </View>
+        <NoticeBanner
+          icon="radio-outline"
+          title="Latest recorded feed"
+          body="Readings come from the latest condition record in the backend. Staff can replace this source with a live feed later."
+        />
 
         {!reading ? (
-          <View style={styles.emptyPanel}>
-            <Ionicons
-              name="cloud-offline-outline"
-              size={32}
-              color={colors.ocean600}
-            />
-
-            <Text style={styles.emptyTitle}>No readings available</Text>
-
-            <Text style={styles.emptyBody}>
-              Pull down to check for a new observation.
-            </Text>
-          </View>
+          <EmptyState
+            icon="cloud-offline-outline"
+            title="No readings available"
+            body="Pull down to check for a new observation."
+          />
         ) : (
           <>
             <View style={styles.instrumentPanel}>
@@ -395,324 +607,3 @@ export function ConditionsScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.deepSea900,
-  },
-  content: {
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxxl,
-  },
-  heroPanel: {
-    marginHorizontal: spacing.lg,
-    borderRadius: radii.lg,
-    padding: spacing.xl,
-    overflow: "hidden",
-    shadowColor: colors.navy900,
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 7,
-  },
-  heroTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
-  heroEyebrow: {
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.7,
-    color: colors.sky400,
-  },
-  heroTitle: {
-    marginTop: 4,
-    maxWidth: 260,
-    fontSize: 23,
-    lineHeight: 28,
-    fontWeight: "800",
-    color: colors.white,
-  },
-  stationBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-    backgroundColor: "rgba(255,255,255,0.1)",
-  },
-  stationDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    marginRight: 6,
-    backgroundColor: colors.warning600,
-  },
-  stationBadgeText: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    color: colors.white,
-  },
-  heroDescription: {
-    marginTop: spacing.md,
-    maxWidth: 320,
-    fontSize: 13,
-    lineHeight: 19,
-    color: colors.sand100,
-  },
-  locationStrip: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacing.xl,
-    paddingTop: spacing.md,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.2)",
-  },
-  locationItem: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  locationText: {
-    marginLeft: spacing.xs,
-    fontFamily: readoutFontFamily,
-    fontSize: 9,
-    fontWeight: "700",
-    letterSpacing: 0.8,
-    color: colors.white,
-  },
-  locationDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 18,
-    marginHorizontal: spacing.md,
-    backgroundColor: "rgba(255,255,255,0.2)",
-  },
-  noticePanel: {
-    flexDirection: "row",
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radii.md,
-    backgroundColor: colors.warningBg,
-    borderWidth: 1,
-    borderColor: "rgba(169,119,46,0.18)",
-  },
-  noticeIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(169,119,46,0.1)",
-  },
-  noticeText: {
-    flex: 1,
-    marginLeft: spacing.md,
-  },
-  noticeTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: colors.warning600,
-  },
-  noticeBody: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 18,
-    color: colors.warning600,
-  },
-  instrumentPanel: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-    shadowColor: colors.navy900,
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    shadowOpacity: 0.06,
-    shadowRadius: 9,
-    elevation: 2,
-  },
-  panelHeading: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  panelHeadingIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: spacing.sm,
-    backgroundColor: colors.warningBg,
-  },
-  panelEyebrow: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.3,
-    color: colors.warning600,
-  },
-  panelTitle: {
-    marginTop: 2,
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.navy900,
-  },
-  conditionGrid: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    marginTop: spacing.lg,
-  },
-  twoColumnConditions: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    marginTop: spacing.lg,
-    paddingHorizontal: spacing.xl,
-  },
-  verticalRule: {
-    width: StyleSheet.hairlineWidth,
-    marginVertical: spacing.sm,
-    backgroundColor: colors.slate200,
-  },
-  panelFooterNote: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacing.md,
-    paddingTop: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.slate200,
-  },
-  panelFooterText: {
-    flex: 1,
-    marginLeft: spacing.xs,
-    fontSize: 10,
-    lineHeight: 14,
-    color: colors.slate400,
-  },
-  directionReadout: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    borderRadius: radii.sm,
-    backgroundColor: colors.sand50,
-  },
-  directionIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-  },
-  directionText: {
-    flex: 1,
-    marginLeft: spacing.sm,
-  },
-  directionLabel: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.slate400,
-  },
-  directionValue: {
-    marginTop: 3,
-    fontFamily: readoutFontFamily,
-    fontSize: 13,
-    fontWeight: "700",
-    color: colors.navy900,
-  },
-  compassNeedle: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sourcePanel: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    padding: spacing.lg,
-    borderRadius: radii.md,
-    backgroundColor: colors.navy900,
-  },
-  sourceTopRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    marginBottom: spacing.md,
-  },
-  sourceEyebrow: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1.3,
-    color: colors.sky400,
-  },
-  sourceTitle: {
-    marginTop: 3,
-    fontSize: 17,
-    fontWeight: "800",
-    color: colors.white,
-  },
-  sourceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "rgba(255,255,255,0.15)",
-  },
-  sourceLabel: {
-    fontSize: 8,
-    fontWeight: "800",
-    letterSpacing: 1,
-    color: colors.sky400,
-  },
-  sourceValue: {
-    flex: 1,
-    marginLeft: spacing.md,
-    fontFamily: readoutFontFamily,
-    fontSize: 10,
-    textAlign: "right",
-    color: colors.white,
-  },
-  disclaimer: {
-    marginTop: spacing.md,
-    fontSize: 10,
-    lineHeight: 15,
-    color: colors.slate200,
-  },
-  emptyPanel: {
-    alignItems: "center",
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.md,
-    padding: spacing.xl,
-    borderRadius: radii.lg,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.sand100,
-  },
-  emptyTitle: {
-    marginTop: spacing.md,
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.navy900,
-  },
-  emptyBody: {
-    marginTop: spacing.xs,
-    fontSize: 13,
-    color: colors.slate600,
-    textAlign: "center",
-  },
-});

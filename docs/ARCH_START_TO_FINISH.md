@@ -1,22 +1,22 @@
 # ScubaXcursions on Arch Linux: Start to Finish
 
-This guide is the only local setup path for version 0.3.1. Do not combine it with the old v0.2 archive, old patches, copied `node_modules` directories, or an old `.env` file.
+This guide is the only local setup path. Do not combine it with copied `node_modules` directories or an old `.env` file.
 
-## 1. What failed in the previous package
+## 1. What this package contains
 
-The previous package installed `@prisma/client` but did not reliably run `prisma generate` before the backend started. That left this required generated folder missing:
-
-```text
-node_modules/.prisma/client
-```
-
-The resulting error was:
+The repository contains:
 
 ```text
-Cannot find module '.prisma/client/default'
+backend/        Express, TypeScript, Prisma and PostgreSQL API
+mobile/         Expo React Native client
+scripts/        Arch setup, startup, reset and diagnostic scripts
+docs/           Setup, Railway and project-status documentation
+compose.yaml    Local PostgreSQL 17 container
 ```
 
-Version 0.3.1 does not import Prisma Client from that fragile implicit path. Its Prisma generator writes generated source to:
+Local PostgreSQL runs in Docker. You do not need to install the Arch `postgresql` package.
+
+The Prisma generator writes generated client source to:
 
 ```text
 backend/src/generated/prisma
@@ -33,52 +33,7 @@ The generated folder is intentionally not committed. It is recreated automatical
 
 The setup script also starts the compiled backend and runs real HTTP requests against it. A missing Prisma client therefore makes setup fail immediately instead of appearing successful.
 
-## 2. What this package contains
-
-The repository contains:
-
-```text
-backend/        Express, TypeScript, Prisma and PostgreSQL API
-mobile/         Expo React Native client
-scripts/        Arch setup, startup, reset and diagnostic scripts
-docs/           Setup, Railway and project-status documentation
-compose.yaml    Local PostgreSQL 17 container
-```
-
-Local PostgreSQL runs in Docker. You do not need to install the Arch `postgresql` package.
-
-## 3. Remove the old working copy from the setup path
-
-Keep the old folder only as a backup. Do not install the new files over it.
-
-From the directory containing your current `scubaX` folder:
-
-```bash
-mv scubaX scubaX-broken-backup
-```
-
-Extract the new archive:
-
-```bash
-unzip ScubaXcursions-Arch-v0.3.1-FINAL.zip
-cd ScubaXcursions-Arch-v0.3.1
-```
-
-Do not copy these from the old folder:
-
-```text
-backend/node_modules
-mobile/node_modules
-backend/.env
-mobile/.env
-backend/src/generated/prisma
-backend/dist
-mobile/.expo
-```
-
-The new archive already contains the complete schema and initial migration. Do not restore migration files from the old project.
-
-## 4. Install the Arch Linux dependencies
+## 2. Install the Arch Linux dependencies
 
 Update Arch first:
 
@@ -124,7 +79,7 @@ sudo pacman -S --needed docker docker-compose
 
 This project uses Docker Engine and the `docker compose` plugin directly.
 
-## 5. Enable Docker
+## 3. Enable Docker
 
 Start Docker now and at boot:
 
@@ -151,7 +106,7 @@ Do not run `npm`, `npx`, or any project script with `sudo`. Doing so creates roo
 
 Docker group membership effectively gives the user root-equivalent control over Docker. Only add trusted local users.
 
-## 6. Verify Node
+## 4. Verify Node
 
 The project requires Node 24 LTS. The package pins Node 24.19.0. The package includes:
 
@@ -188,7 +143,7 @@ source ~/.bashrc
 
 For Zsh, use `~/.zshrc` instead of `~/.bashrc`.
 
-## 7. Check ports before setup
+## 5. Check ports before setup
 
 The local ScubaX database uses host port 5433 and the API uses port 3000. Port 5432 is deliberately left free for any existing PostgreSQL service.
 
@@ -212,7 +167,7 @@ SCUBAX_DB_PORT=55432 ./scripts/setup-local.sh
 
 When an old Node backend occupies port 3000, stop that process before continuing.
 
-## 8. Run the one-time setup
+## 6. Run the one-time setup
 
 From the repository root:
 
@@ -261,7 +216,7 @@ Password: LocalClient123!
 
 These accounts are created only by the local development seed. They are not production credentials.
 
-## 9. Start the backend each day
+## 7. Start the backend each day
 
 Open Terminal 1 at the repository root:
 
@@ -315,7 +270,7 @@ You can also check health directly:
 curl http://127.0.0.1:3000/health
 ```
 
-## 10. Make the backend reachable from the phone
+## 8. Make the backend reachable from the phone
 
 The setup script writes the detected LAN address to:
 
@@ -382,7 +337,7 @@ Port 3000 is the API. Expo normally uses 8081 but prints the actual Metro port i
 
 Some Wi-Fi networks enable client isolation, which prevents devices from reaching each other. Railway staging avoids that problem by giving the phone a public HTTPS API.
 
-## 11. Install the mobile development build
+## 9. Install the mobile development build
 
 The recommended phone workflow is an Expo development build, not the public Expo Go store build. Expo SDK 57 may be newer than the Expo Go version currently approved in an app store.
 
@@ -417,7 +372,7 @@ npx eas-cli@latest build \
 
 Arch Linux cannot compile a native iOS app locally because Apple's iOS toolchain requires macOS and Xcode. EAS performs the build in the cloud. A physical iPhone development build normally requires the appropriate Apple Developer account and device registration.
 
-## 12. Start the mobile app each day
+## 10. Start the mobile app each day
 
 Keep the backend running in Terminal 1.
 
@@ -449,7 +404,7 @@ npm run start:go
 
 Use the development build as the normal path because it matches the project's native dependency model and future development needs.
 
-## 13. Normal shutdown
+## 11. Normal shutdown
 
 Stop backend and Metro with `Ctrl+C` in their terminals.
 
@@ -461,7 +416,7 @@ docker compose stop
 
 Start it again through `./scripts/start-backend.sh`.
 
-## 14. Completely reset disposable local data
+## 12. Completely reset disposable local data
 
 This deletes the entire ScubaX local PostgreSQL Docker volume, recreates the database, reapplies the migration and reruns all seeds and checks:
 
@@ -471,7 +426,7 @@ This deletes the entire ScubaX local PostgreSQL Docker volume, recreates the dat
 
 Do not use it once local data matters.
 
-## 15. Run diagnostics
+## 13. Run diagnostics
 
 ```bash
 ./scripts/doctor.sh
@@ -479,7 +434,7 @@ Do not use it once local data matters.
 
 The doctor checks Arch dependencies, Docker access, source consistency, environment files, Compose configuration and PostgreSQL readiness.
 
-## 16. Future Prisma schema changes
+## 14. Future Prisma schema changes
 
 Never edit the committed initial migration after another environment has used it.
 
@@ -502,11 +457,11 @@ backend/prisma/migrations/<new_timestamp>_describe_the_change/migration.sql
 
 Use `prisma migrate dev` only against a development database. Railway runs `prisma migrate deploy`.
 
-## 17. Common failures
+## 15. Common failures
 
 ### `Cannot find module '.prisma/client/default'`
 
-That exact path identifies the old package or old dependencies. Confirm that the current backend schema contains:
+That exact path identifies an implicit Prisma Client import path this project does not use. Confirm that the current backend schema contains:
 
 ```prisma
 provider = "prisma-client"
@@ -592,7 +547,7 @@ Stop the old backend process. Do not run two copies on the same port.
 5. Check firewall, VPN and Wi-Fi client isolation.
 6. Use Railway staging when local routing remains blocked.
 
-## 18. Continue to Railway
+## 16. Continue to Railway
 
 After local setup and `npm run smoke` pass, follow:
 
